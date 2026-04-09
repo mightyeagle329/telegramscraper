@@ -151,7 +151,7 @@ async def scrape_group_members(url: str, mark_new: bool = False) -> dict:
             raise ValueError(f"Cannot access private channel '{group_name}'")
 
     # Export to Google Sheets
-    new_count = sheets_manager.append_members(group_name, members, mark_new=mark_new)
+    new_count = sheets_manager.append_members(group_name, url, members, mark_new=mark_new)
 
     return {
         "group_name": group_name,
