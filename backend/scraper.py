@@ -5,9 +5,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 from telethon import TelegramClient
-from telethon.tl.functions.channels import GetParticipantsRequest
 from telethon.tl.functions.messages import CheckChatInviteRequest
-from telethon.tl.types import ChannelParticipantsSearch
 from telethon.errors import (
     FloodWaitError,
     ChatAdminRequiredError,
@@ -152,59 +150,72 @@ async def resolve_group(url: str):
 
 
 async def scrape_group_members(url: str, mark_new: bool = False) -> dict:
-    """Scrape all members from a group and export to Google Sheets."""
+    """Scrape all members from a group and export to Google Sheets.
+
+    Uses Telethon's iter_participants which handles pagination, rate limits,
+    and works with both supergroups and channels (where allowed).
+
+    Note: For broadcast channels, Telegram only exposes admins to non-admin
+    users. To get full member lists from a broadcast channel, the account
+    must be an admin of that channel.
+    """
     tc = await get_client()
     entity = await resolve_group(url)
 
     group_name = getattr(entity, "title", str(entity.id))
     group_id = entity.id
 
+    is_broadcast = getattr(entity, "broadcast", False)
+    is_megagroup = getattr(entity, "megagroup", False)
+    total_count = getattr(entity, "participants_count", 0) or 0
+
+    logger.info(
+        f"Scraping '{group_name}' (broadcast={is_broadcast}, "
+        f"megagroup={is_megagroup}, total={total_count})"
+    )
+
     members = []
-    offset = 0
-    limit = 200
+    seen_ids = set()
 
-    while True:
-        try:
-            participants = await tc(
-                GetParticipantsRequest(
-                    channel=entity,
-                    filter=ChannelParticipantsSearch(""),
-                    offset=offset,
-                    limit=limit,
-                    hash=0,
-                )
+    try:
+        # iter_participants handles pagination and rate limits automatically
+        async for user in tc.iter_participants(entity, aggressive=True):
+            if user.id in seen_ids:
+                continue
+            seen_ids.add(user.id)
+            members.append(
+                {
+                    "user_id": user.id,
+                    "username": user.username or "",
+                    "first_name": user.first_name or "",
+                    "last_name": user.last_name or "",
+                    "phone": getattr(user, "phone", "") or "",
+                }
             )
+    except FloodWaitError as e:
+        logger.warning(f"FloodWait during scrape: {e.seconds}s")
+        await asyncio.sleep(e.seconds + 1)
+    except ChatAdminRequiredError:
+        raise ValueError(
+            f"Admin access required to scrape members from '{group_name}'. "
+            f"This is likely a broadcast channel - only admins can access the "
+            f"full member list."
+        )
+    except ChannelPrivateError:
+        raise ValueError(f"Cannot access private channel '{group_name}'")
 
-            if not participants.users:
-                break
+    logger.info(
+        f"Scraped {len(members)} members from '{group_name}' "
+        f"(total in group: {total_count})"
+    )
 
-            for user in participants.users:
-                members.append(
-                    {
-                        "user_id": user.id,
-                        "username": user.username or "",
-                        "first_name": user.first_name or "",
-                        "last_name": user.last_name or "",
-                        "phone": getattr(user, "phone", "") or "",
-                    }
-                )
-
-            offset += len(participants.users)
-
-            if len(participants.users) < limit:
-                break
-
-            await asyncio.sleep(1)
-
-        except FloodWaitError as e:
-            logger.warning(f"FloodWait: sleeping {e.seconds}s")
-            await asyncio.sleep(e.seconds + 1)
-        except ChatAdminRequiredError:
-            raise ValueError(
-                f"Admin access required to scrape members from '{group_name}'"
-            )
-        except ChannelPrivateError:
-            raise ValueError(f"Cannot access private channel '{group_name}'")
+    # Warn if we got significantly fewer than expected (broadcast channel case)
+    if is_broadcast and total_count > 0 and len(members) < total_count * 0.1:
+        logger.warning(
+            f"Only got {len(members)}/{total_count} members from broadcast "
+            f"channel '{group_name}'. Telegram restricts member visibility "
+            f"to admins only for broadcast channels."
+        )
 
     new_count = sheets_manager.append_members(
         group_name, url, members, mark_new=mark_new
