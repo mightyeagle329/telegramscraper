@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 from telethon import TelegramClient
+from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import CheckChatInviteRequest
 from telethon.errors import (
     FloodWaitError,
@@ -225,6 +226,113 @@ async def scrape_group_members(url: str, mark_new: bool = False) -> dict:
         "group_name": group_name,
         "group_id": group_id,
         "group_url": url,
+        "total_members_found": len(members),
+        "new_members_added": new_count,
+        "exported_to_sheet": True,
+        "scraped_at": datetime.now().isoformat(),
+    }
+
+
+async def scrape_group_from_messages(
+    url: str, mark_new: bool = False, message_limit: int = 5000
+) -> dict:
+    """Scrape unique users from a group's message history.
+
+    This is a workaround for broadcast channels where the member list is
+    restricted. For channels with a linked discussion group, this will
+    automatically scrape the discussion group instead.
+
+    Args:
+        url: Telegram group URL or invite link
+        mark_new: Mark newly added members as "NEW"
+        message_limit: Maximum number of messages to scan (default: 5000)
+
+    Returns:
+        Dict with scrape results
+    """
+    tc = await get_client()
+    entity = await resolve_group(url)
+
+    group_name = getattr(entity, "title", str(entity.id))
+    group_id = entity.id
+    is_broadcast = getattr(entity, "broadcast", False)
+
+    # For broadcast channels, try to find a linked discussion group
+    target_entity = entity
+    target_name = group_name
+
+    if is_broadcast:
+        try:
+            full = await tc(GetFullChannelRequest(channel=entity))
+            linked_chat_id = getattr(full.full_chat, "linked_chat_id", None)
+            if linked_chat_id:
+                for chat in full.chats:
+                    if chat.id == linked_chat_id:
+                        target_entity = chat
+                        target_name = getattr(chat, "title", group_name)
+                        logger.info(
+                            f"Using linked discussion group '{target_name}' "
+                            f"instead of broadcast channel '{group_name}'"
+                        )
+                        break
+        except Exception as e:
+            logger.warning(f"Could not check for linked discussion group: {e}")
+
+    logger.info(
+        f"Scraping users from messages in '{target_name}' "
+        f"(up to {message_limit} messages)"
+    )
+
+    members = []
+    seen_ids = set()
+    scanned = 0
+
+    try:
+        async for message in tc.iter_messages(target_entity, limit=message_limit):
+            scanned += 1
+            sender = message.sender
+            if sender is None or getattr(sender, "bot", False):
+                continue
+            # Only include users (not channels/chats posting on behalf)
+            if not hasattr(sender, "id") or sender.id in seen_ids:
+                continue
+            # Skip if sender is not a user
+            if sender.__class__.__name__ != "User":
+                continue
+
+            seen_ids.add(sender.id)
+            members.append(
+                {
+                    "user_id": sender.id,
+                    "username": sender.username or "",
+                    "first_name": sender.first_name or "",
+                    "last_name": sender.last_name or "",
+                    "phone": getattr(sender, "phone", "") or "",
+                }
+            )
+    except FloodWaitError as e:
+        logger.warning(f"FloodWait during message scrape: {e.seconds}s")
+        await asyncio.sleep(e.seconds + 1)
+    except ChannelPrivateError:
+        raise ValueError(f"Cannot access '{target_name}' (private)")
+
+    logger.info(
+        f"Scanned {scanned} messages in '{target_name}', "
+        f"found {len(members)} unique users"
+    )
+
+    # Save to sheet under the ORIGINAL group name (not the linked discussion)
+    new_count = sheets_manager.append_members(
+        group_name, url, members, mark_new=mark_new
+    )
+
+    return {
+        "group_name": group_name,
+        "group_id": group_id,
+        "group_url": url,
+        "source": "messages",
+        "source_group": target_name,
+        "messages_scanned": scanned,
         "total_members_found": len(members),
         "new_members_added": new_count,
         "exported_to_sheet": True,

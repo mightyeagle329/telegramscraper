@@ -29,6 +29,11 @@ export const api = {
   // Scraping
   scrapeGroup: (id: string) =>
     request<any>(`/api/groups/${id}/scrape`, { method: "POST" }),
+  scrapeGroupMessages: (id: string, messageLimit: number = 5000) =>
+    request<any>(
+      `/api/groups/${id}/scrape-messages?message_limit=${messageLimit}`,
+      { method: "POST" }
+    ),
 
   // Monitoring
   startMonitoring: (id: string, interval: number = 300) =>

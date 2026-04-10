@@ -5,7 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import FRONTEND_URL
 from models import GroupAdd
-from scraper import scrape_group_members, get_group_info, disconnect, init_client
+from scraper import (
+    scrape_group_members,
+    scrape_group_from_messages,
+    get_group_info,
+    disconnect,
+    init_client,
+)
 from sheets import sheets_manager
 from monitor import (
     start_monitoring,
@@ -119,6 +125,31 @@ async def scrape_group(group_id: str):
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error scraping group: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/groups/{group_id}/scrape-messages")
+async def scrape_group_messages(group_id: str, message_limit: int = 5000):
+    """Scrape users from message history (workaround for broadcast channels)."""
+    if group_id not in groups_store:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    group = groups_store[group_id]
+    try:
+        result = await scrape_group_from_messages(
+            group["url"], message_limit=message_limit
+        )
+        groups_store[group_id].update(
+            {
+                "scraped_count": result["total_members_found"],
+                "last_scraped": result["scraped_at"],
+            }
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error scraping group messages: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

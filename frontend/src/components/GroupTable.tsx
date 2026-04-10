@@ -29,6 +29,20 @@ export default function GroupTable({ groups, onRefresh }: GroupTableProps) {
     }
   };
 
+  const handleScrapeMessages = async (group: Group) => {
+    setScraping(group.id);
+    setError("");
+    try {
+      const result = await api.scrapeGroupMessages(group.id, 5000);
+      setResults((prev) => ({ ...prev, [group.id]: result }));
+      onRefresh();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setScraping(null);
+    }
+  };
+
   const handleMonitorToggle = async (group: Group) => {
     const isCurrentlyMonitoring = group.status === "monitoring";
     try {
@@ -129,13 +143,22 @@ export default function GroupTable({ groups, onRefresh }: GroupTableProps) {
                     : "Never"}
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={() => handleScrape(group)}
                       disabled={scraping === group.id}
                       className="bg-accent-purple hover:bg-accent-purple/80 disabled:opacity-50 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+                      title="Scrape member list (works for supergroups)"
                     >
-                      {scraping === group.id ? "Scraping..." : "Scrape"}
+                      {scraping === group.id ? "Scraping..." : "Scrape Members"}
+                    </button>
+                    <button
+                      onClick={() => handleScrapeMessages(group)}
+                      disabled={scraping === group.id}
+                      className="bg-accent-blue/80 hover:bg-accent-blue disabled:opacity-50 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+                      title="Extract users from message history (works for broadcast channels)"
+                    >
+                      {scraping === group.id ? "Scraping..." : "Scrape Messages"}
                     </button>
                     <button
                       onClick={() => handleMonitorToggle(group)}
