@@ -20,32 +20,61 @@ from monitor import (
     get_all_monitoring,
     stop_all,
 )
+from storage import load_groups, save_groups
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Persistent store of added groups (loaded on startup, saved on every change)
+groups_store: dict = {}
+
+
+def _persist():
+    """Save groups to disk."""
+    save_groups(groups_store)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: connect to Google Sheets
+    # Load persisted groups
+    global groups_store
+    groups_store = load_groups()
+    logger.info(f"Loaded {len(groups_store)} groups from storage")
+
+    # Connect to Google Sheets
     try:
         sheets_manager.connect()
         logger.info("Connected to Google Sheets")
     except Exception as e:
         logger.warning(f"Could not connect to Google Sheets: {e}")
 
-    # Startup: log in to Telegram (this may prompt for a code in terminal)
+    # Log in to Telegram (this may prompt for a code in terminal)
     try:
         await init_client()
         logger.info("Telegram client ready")
     except Exception as e:
         logger.error(f"Telegram client init failed: {e}")
 
+    # Resume monitoring for groups that were monitoring before restart
+    for group_id, group in groups_store.items():
+        if group.get("status") == "monitoring":
+            try:
+                mode = group.get("scrape_mode", "members")
+                start_monitoring(group["url"], mode=mode)
+                logger.info(
+                    f"Resumed monitoring for {group['name']} (mode={mode})"
+                )
+            except Exception as e:
+                logger.error(f"Could not resume monitoring for {group['name']}: {e}")
+                groups_store[group_id]["status"] = "active"
+    _persist()
+
     yield
 
     # Shutdown: stop monitors and disconnect Telegram
     stop_all()
     await disconnect()
+    _persist()
     logger.info("Shutdown complete")
 
 
@@ -59,9 +88,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory store of added groups
-groups_store: dict = {}
-
 
 @app.get("/api/health")
 async def health():
@@ -73,12 +99,15 @@ async def add_group(group: GroupAdd):
     """Add a new group to track."""
     try:
         info = await get_group_info(group.url)
+        existing = groups_store.get(info["id"], {})
         groups_store[info["id"]] = {
             **info,
-            "scraped_count": 0,
-            "status": "active",
-            "last_scraped": None,
+            "scraped_count": existing.get("scraped_count", 0),
+            "status": existing.get("status", "active"),
+            "last_scraped": existing.get("last_scraped"),
+            "scrape_mode": existing.get("scrape_mode", "members"),
         }
+        _persist()
         return groups_store[info["id"]]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -100,6 +129,7 @@ async def remove_group(group_id: str):
         group = groups_store[group_id]
         stop_monitoring(group["url"])
         del groups_store[group_id]
+        _persist()
         return {"status": "removed"}
     raise HTTPException(status_code=404, detail="Group not found")
 
@@ -117,9 +147,10 @@ async def scrape_group(group_id: str):
             {
                 "scraped_count": result["total_members_found"],
                 "last_scraped": result["scraped_at"],
-                "status": groups_store[group_id]["status"],
+                "scrape_mode": "members",
             }
         )
+        _persist()
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -143,8 +174,10 @@ async def scrape_group_messages(group_id: str, message_limit: int = 5000):
             {
                 "scraped_count": result["total_members_found"],
                 "last_scraped": result["scraped_at"],
+                "scrape_mode": "messages",
             }
         )
+        _persist()
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -155,13 +188,18 @@ async def scrape_group_messages(group_id: str, message_limit: int = 5000):
 
 @app.post("/api/groups/{group_id}/monitor/start")
 async def start_group_monitor(group_id: str, interval: int = 300):
-    """Start monitoring a group for new members."""
+    """Start monitoring a group for new members.
+
+    Uses whichever scrape mode was last used for this group (members or messages).
+    """
     if group_id not in groups_store:
         raise HTTPException(status_code=404, detail="Group not found")
 
     group = groups_store[group_id]
-    status = start_monitoring(group["url"], interval)
+    mode = group.get("scrape_mode", "members")
+    status = start_monitoring(group["url"], interval, mode=mode)
     groups_store[group_id]["status"] = "monitoring"
+    _persist()
     return status
 
 
@@ -174,6 +212,7 @@ async def stop_group_monitor(group_id: str):
     group = groups_store[group_id]
     status = stop_monitoring(group["url"])
     groups_store[group_id]["status"] = "active"
+    _persist()
     return status
 
 

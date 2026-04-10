@@ -7,6 +7,7 @@ backend/*.session
 backend/*.session-journal
 backend/token.json
 backend/credentials.json
+backend/groups.json
 backend/.env
 
 # Node / Next.js
