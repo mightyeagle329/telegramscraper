@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import FRONTEND_URL
 from models import GroupAdd
-from scraper import scrape_group_members, get_group_info, disconnect
+from scraper import scrape_group_members, get_group_info, disconnect, init_client
 from sheets import sheets_manager
 from monitor import (
     start_monitoring,
@@ -27,6 +27,13 @@ async def lifespan(app: FastAPI):
         logger.info("Connected to Google Sheets")
     except Exception as e:
         logger.warning(f"Could not connect to Google Sheets: {e}")
+
+    # Startup: log in to Telegram (this may prompt for a code in terminal)
+    try:
+        await init_client()
+        logger.info("Telegram client ready")
+    except Exception as e:
+        logger.error(f"Telegram client init failed: {e}")
 
     yield
 
@@ -177,4 +184,4 @@ async def get_sheet_members(group_name: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)

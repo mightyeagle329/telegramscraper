@@ -1,5 +1,7 @@
 import asyncio
+import os
 import re
+import logging
 from datetime import datetime
 from typing import Optional
 from telethon import TelegramClient
@@ -11,20 +13,85 @@ from telethon.errors import (
     ChatAdminRequiredError,
     ChannelPrivateError,
     InviteHashExpiredError,
+    AuthKeyUnregisteredError,
+    AuthKeyError,
 )
 
 from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE
 from sheets import sheets_manager
 
+logger = logging.getLogger(__name__)
+
+SESSION_NAME = "session"
 client: Optional[TelegramClient] = None
+_client_lock = asyncio.Lock()
+
+
+async def init_client() -> TelegramClient:
+    """Initialize and log in the Telegram client at startup.
+
+    This must be called BEFORE any API requests come in, because the
+    Telethon login flow may require interactive code input in the terminal
+    and may trigger a data center migration.
+    """
+    global client
+
+    async with _client_lock:
+        if client is not None and client.is_connected():
+            try:
+                me = await client.get_me()
+                if me is not None:
+                    return client
+            except (AuthKeyUnregisteredError, AuthKeyError):
+                logger.warning("Session invalid, will recreate")
+                await _force_disconnect()
+
+        client = TelegramClient(SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        try:
+            await client.start(phone=TELEGRAM_PHONE)
+            me = await client.get_me()
+            logger.info(f"Telegram client logged in as: {me.first_name}")
+        except (AuthKeyUnregisteredError, AuthKeyError) as e:
+            logger.error(f"Session broken: {e}. Deleting session file and retrying.")
+            await _force_disconnect()
+            _delete_session_files()
+
+            client = TelegramClient(SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+            await client.start(phone=TELEGRAM_PHONE)
+            me = await client.get_me()
+            logger.info(f"Telegram client logged in as: {me.first_name}")
+
+        return client
+
+
+async def _force_disconnect():
+    """Disconnect the current client if any."""
+    global client
+    if client is not None:
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+        client = None
+
+
+def _delete_session_files():
+    """Delete Telethon session files to force a fresh login."""
+    for ext in (".session", ".session-journal"):
+        path = f"{SESSION_NAME}{ext}"
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+                logger.info(f"Deleted stale session file: {path}")
+            except Exception as e:
+                logger.warning(f"Could not delete {path}: {e}")
 
 
 async def get_client() -> TelegramClient:
-    """Get or create the Telegram client. On first run, prompts for login code."""
+    """Return the active Telegram client (must be initialized first)."""
     global client
     if client is None or not client.is_connected():
-        client = TelegramClient("session", TELEGRAM_API_ID, TELEGRAM_API_HASH)
-        await client.start(phone=TELEGRAM_PHONE)
+        return await init_client()
     return client
 
 
@@ -40,7 +107,6 @@ def parse_group_url(url: str) -> dict:
     """
     url = url.strip()
 
-    # Invite links
     invite_match = re.search(r"tg://join\?invite=([a-zA-Z0-9_-]+)", url)
     if invite_match:
         return {"type": "invite", "hash": invite_match.group(1)}
@@ -53,12 +119,10 @@ def parse_group_url(url: str) -> dict:
     if joinchat_match:
         return {"type": "invite", "hash": joinchat_match.group(1)}
 
-    # Public group
     public_match = re.search(r"t\.me/([a-zA-Z0-9_]+)", url)
     if public_match:
         return {"type": "public", "username": public_match.group(1)}
 
-    # Raw username
     if re.match(r"^@?[a-zA-Z0-9_]+$", url):
         return {"type": "public", "username": url.lstrip("@")}
 
@@ -88,15 +152,7 @@ async def resolve_group(url: str):
 
 
 async def scrape_group_members(url: str, mark_new: bool = False) -> dict:
-    """Scrape all members from a group and export to Google Sheets.
-
-    Args:
-        url: Telegram group URL or invite link
-        mark_new: If True, marks newly added members as "NEW" in the sheet
-
-    Returns:
-        Dict with scrape results (total found, new added, etc.)
-    """
+    """Scrape all members from a group and export to Google Sheets."""
     tc = await get_client()
     entity = await resolve_group(url)
 
@@ -138,10 +194,10 @@ async def scrape_group_members(url: str, mark_new: bool = False) -> dict:
             if len(participants.users) < limit:
                 break
 
-            # Respect Telegram rate limits
             await asyncio.sleep(1)
 
         except FloodWaitError as e:
+            logger.warning(f"FloodWait: sleeping {e.seconds}s")
             await asyncio.sleep(e.seconds + 1)
         except ChatAdminRequiredError:
             raise ValueError(
@@ -150,8 +206,9 @@ async def scrape_group_members(url: str, mark_new: bool = False) -> dict:
         except ChannelPrivateError:
             raise ValueError(f"Cannot access private channel '{group_name}'")
 
-    # Export to Google Sheets
-    new_count = sheets_manager.append_members(group_name, url, members, mark_new=mark_new)
+    new_count = sheets_manager.append_members(
+        group_name, url, members, mark_new=mark_new
+    )
 
     return {
         "group_name": group_name,
@@ -177,8 +234,5 @@ async def get_group_info(url: str) -> dict:
 
 
 async def disconnect():
-    """Disconnect the Telegram client."""
-    global client
-    if client and client.is_connected():
-        await client.disconnect()
-        client = None
+    """Disconnect the Telegram client on shutdown."""
+    await _force_disconnect()
