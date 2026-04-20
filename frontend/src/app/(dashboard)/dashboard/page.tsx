@@ -50,7 +50,7 @@ export default function DashboardHome() {
   };
 
   return (
-    <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+    <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Overview</h1>
         <p className="text-text-muted text-sm">
@@ -80,7 +80,7 @@ export default function DashboardHome() {
             <h2 className="text-lg font-semibold">Queue</h2>
             <Link
               href="/campaigns"
-              className="text-xs text-text-muted hover:text-white"
+              className="text-xs text-text-muted hover:text-foreground"
             >
               manage →
             </Link>
@@ -92,7 +92,7 @@ export default function DashboardHome() {
               No DMs queued. Start a campaign from the{" "}
               <Link
                 href="/campaigns"
-                className="text-white hover:underline"
+                className="text-foreground hover:underline"
               >
                 Campaigns
               </Link>{" "}
@@ -120,7 +120,7 @@ export default function DashboardHome() {
             <h2 className="text-lg font-semibold">Recent sends</h2>
             <Link
               href="/campaigns"
-              className="text-xs text-text-muted hover:text-white"
+              className="text-xs text-text-muted hover:text-foreground"
             >
               all →
             </Link>

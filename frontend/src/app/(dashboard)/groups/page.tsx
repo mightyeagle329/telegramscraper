@@ -28,7 +28,7 @@ export default function GroupsPage() {
 
   return (
     <>
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold">Groups</h1>
           <p className="text-text-muted text-sm">

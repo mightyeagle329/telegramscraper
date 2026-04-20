@@ -147,7 +147,7 @@ export default function GroupTable({ groups, onRefresh }: GroupTableProps) {
                     <button
                       onClick={() => handleScrape(group)}
                       disabled={scraping === group.id}
-                      className="bg-accent-purple hover:bg-accent-purple/80 disabled:opacity-50 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+                      className="bg-accent-purple hover:bg-accent-purple/80 disabled:opacity-50 text-foreground text-sm px-3 py-1.5 rounded-lg transition-colors"
                       title="Scrape member list (works for supergroups)"
                     >
                       {scraping === group.id ? "Scraping..." : "Scrape Members"}
@@ -155,7 +155,7 @@ export default function GroupTable({ groups, onRefresh }: GroupTableProps) {
                     <button
                       onClick={() => handleScrapeMessages(group)}
                       disabled={scraping === group.id}
-                      className="bg-accent-blue/80 hover:bg-accent-blue disabled:opacity-50 text-white text-sm px-3 py-1.5 rounded-lg transition-colors"
+                      className="bg-accent-blue/80 hover:bg-accent-blue disabled:opacity-50 text-foreground text-sm px-3 py-1.5 rounded-lg transition-colors"
                       title="Extract users from message history (works for broadcast channels)"
                     >
                       {scraping === group.id ? "Scraping..." : "Scrape Messages"}

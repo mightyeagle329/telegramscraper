@@ -11,7 +11,7 @@ import TemplatesManager from "@/components/templates/TemplatesManager";
 export default async function TemplatesPage() {
   if (!isSupabaseConfigured()) {
     return (
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Templates</h1>
           <p className="text-text-muted text-sm">
@@ -21,7 +21,7 @@ export default async function TemplatesPage() {
           </p>
         </div>
         <div className="bg-card-bg border border-card-border rounded-xl p-8 text-center">
-          <p className="font-medium text-white mb-2">
+          <p className="font-medium text-foreground mb-2">
             Templates need Supabase.
           </p>
           <p className="text-sm text-text-muted mb-4 max-w-lg mx-auto">
@@ -34,7 +34,7 @@ export default async function TemplatesPage() {
             href="https://supabase.com"
             target="_blank"
             rel="noreferrer"
-            className="text-sm text-white hover:underline"
+            className="text-sm text-foreground hover:underline"
           >
             Set up a free Supabase project
           </Link>
@@ -52,7 +52,7 @@ export default async function TemplatesPage() {
   const error = result.ok ? null : result.error;
 
   return (
-    <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+    <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Templates</h1>
         <p className="text-text-muted text-sm">

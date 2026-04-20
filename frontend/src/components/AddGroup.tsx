@@ -43,7 +43,7 @@ export default function AddGroup({ onGroupAdded }: AddGroupProps) {
         <button
           onClick={handleAdd}
           disabled={loading || !url.trim()}
-          className="bg-accent-purple hover:bg-accent-purple/80 disabled:opacity-50 text-white px-6 py-3 rounded-lg font-medium transition-colors whitespace-nowrap"
+          className="bg-accent-purple hover:bg-accent-purple/80 disabled:opacity-50 text-foreground px-6 py-3 rounded-lg font-medium transition-colors whitespace-nowrap"
         >
           {loading ? "Adding..." : "+ Add"}
         </button>

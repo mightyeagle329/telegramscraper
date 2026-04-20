@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -13,9 +14,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Telegram Group Scraper",
-  description: "Extract and monitor Telegram group members for outreach",
+  title: "Telegram Outreach",
+  description:
+    "Multi-account Telegram outreach with warm-up, per-account proxies, and a safe sender.",
 };
+
+// Runs before React hydrates so the theme applies without a flash.
+const themeBootScript = `
+try {
+  var t = localStorage.getItem("to-theme");
+  if (t === "light" || t === "dark") {
+    document.documentElement.setAttribute("data-theme", t);
+  }
+} catch (_) {}
+`;
 
 export default function RootLayout({
   children,
@@ -27,6 +39,11 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <Script id="theme-boot" strategy="beforeInteractive">
+          {themeBootScript}
+        </Script>
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

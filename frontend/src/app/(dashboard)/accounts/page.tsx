@@ -85,7 +85,7 @@ export default function AccountsPage() {
 
   return (
     <>
-      <main className="max-w-6xl mx-auto px-6 py-8">
+      <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8">
         <div className="mb-6">
           <h1 className="text-2xl font-bold">Accounts</h1>
           <p className="text-text-muted text-sm">
@@ -149,7 +149,7 @@ export default function AccountsPage() {
           </div>
         ) : accounts.length === 0 ? (
           <div className="bg-card-bg border border-card-border rounded-xl p-8 text-center text-text-muted">
-            <p className="font-medium text-white mb-2">No accounts yet.</p>
+            <p className="font-medium text-foreground mb-2">No accounts yet.</p>
             <p className="text-sm mb-4">
               Click <strong>+ Add account</strong> above to onboard your first
               sender (phone + IPRoyal sticky session + SMS code, all from this

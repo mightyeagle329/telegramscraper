@@ -1,45 +1,117 @@
 @import "tailwindcss";
 
+/* ────────────────────────────────────────────────────────────────────────
+   Theme tokens
+   ----------------------------------------------------------------------
+   Default is dark (matches the app's current look). Light mode is opt-in
+   via `html[data-theme="light"]`. The ThemeToggle component in the nav
+   writes this attribute and persists the choice in localStorage.
+   "system" mode removes the attribute and lets prefers-color-scheme win.
+   ──────────────────────────────────────────────────────────────────── */
+
 :root {
+  /* Dark theme (default) */
   --background: #0f0b1a;
+  --background-elevated: #1a1433;
   --foreground: #e2e8f0;
   --card-bg: #1a1433;
   --card-border: #2d2555;
+  --text-muted: #94a3b8;
   --accent-purple: #7c3aed;
   --accent-green: #22c55e;
   --accent-red: #ef4444;
   --accent-blue: #3b82f6;
-  --text-muted: #94a3b8;
+  --accent-yellow: #eab308;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.05) inset,
+    0 8px 24px -12px rgba(0, 0, 0, 0.4);
+}
+
+:root[data-theme="light"] {
+  --background: #f7f7f9;
+  --background-elevated: #ffffff;
+  --foreground: #0f172a;
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --text-muted: #64748b;
+  --accent-purple: #7c3aed;
+  --accent-green: #16a34a;
+  --accent-red: #dc2626;
+  --accent-blue: #2563eb;
+  --accent-yellow: #d97706;
+  --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04),
+    0 8px 24px -12px rgba(15, 23, 42, 0.08);
+}
+
+/* System preference fallback when the user hasn't explicitly chosen. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]):not([data-theme="light"]) {
+    --background: #f7f7f9;
+    --background-elevated: #ffffff;
+    --foreground: #0f172a;
+    --card-bg: #ffffff;
+    --card-border: #e2e8f0;
+    --text-muted: #64748b;
+    --accent-green: #16a34a;
+    --accent-red: #dc2626;
+    --accent-blue: #2563eb;
+    --accent-yellow: #d97706;
+    --shadow-card: 0 1px 2px 0 rgba(15, 23, 42, 0.04),
+      0 8px 24px -12px rgba(15, 23, 42, 0.08);
+  }
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-elevated: var(--background-elevated);
   --color-foreground: var(--foreground);
   --color-card-bg: var(--card-bg);
   --color-card-border: var(--card-border);
+  --color-text-muted: var(--text-muted);
   --color-accent-purple: var(--accent-purple);
   --color-accent-green: var(--accent-green);
   --color-accent-red: var(--accent-red);
   --color-accent-blue: var(--accent-blue);
-  --color-text-muted: var(--text-muted);
+  --color-accent-yellow: var(--accent-yellow);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
+html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    var(--font-geist-sans), system-ui, -apple-system, "Segoe UI",
+    Roboto, sans-serif;
+  transition: background-color 120ms ease;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar — subtle in both themes */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--card-bg);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: var(--card-border);
-  border-radius: 3px;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Focus ring consistency across themes */
+:focus-visible {
+  outline: 2px solid var(--accent-green);
+  outline-offset: 2px;
+}
+
+/* Subtle card lift used by stat + action cards */
+.card-elevated {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  box-shadow: var(--shadow-card);
+  border-radius: 0.75rem;
 }

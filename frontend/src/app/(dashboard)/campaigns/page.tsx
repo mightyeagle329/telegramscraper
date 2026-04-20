@@ -136,7 +136,7 @@ export default function CampaignsPage() {
 
   return (
     <>
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Campaigns</h1>
           <p className="text-text-muted text-sm">
@@ -225,7 +225,7 @@ export default function CampaignsPage() {
                   <button
                     type="button"
                     onClick={selectAllEligible}
-                    className="text-text-muted hover:text-white"
+                    className="text-text-muted hover:text-foreground"
                   >
                     select all active ({eligibleAccounts.length})
                   </button>
@@ -233,7 +233,7 @@ export default function CampaignsPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedAccountIds([])}
-                    className="text-text-muted hover:text-white"
+                    className="text-text-muted hover:text-foreground"
                   >
                     clear
                   </button>

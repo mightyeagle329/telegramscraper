@@ -18,7 +18,7 @@ export default function LandingPage() {
           <nav className="flex items-center gap-2 text-sm">
             <Link
               href="/login"
-              className="px-3 py-1.5 rounded-lg text-text-muted hover:text-white"
+              className="px-3 py-1.5 rounded-lg text-text-muted hover:text-foreground"
             >
               Log in
             </Link>
@@ -51,7 +51,7 @@ export default function LandingPage() {
             </Link>
             <Link
               href="/login"
-              className="px-5 py-3 rounded-lg border border-card-border text-text-muted hover:text-white"
+              className="px-5 py-3 rounded-lg border border-card-border text-text-muted hover:text-foreground"
             >
               I have an account
             </Link>
@@ -87,7 +87,7 @@ export default function LandingPage() {
           <div>
             <h2 className="text-2xl font-semibold">What you&apos;ll need</h2>
             <ul className="text-text-muted text-sm mt-3 space-y-2 list-disc list-inside">
-              <li><strong>Telegram API credentials</strong> from <Link href="https://my.telegram.org" target="_blank" className="text-white hover:underline">my.telegram.org</Link> (free).</li>
+              <li><strong>Telegram API credentials</strong> from <Link href="https://my.telegram.org" target="_blank" className="text-foreground hover:underline">my.telegram.org</Link> (free).</li>
               <li><strong>Virtual or physical phone numbers</strong> for up to 10 sender accounts.</li>
               <li><strong>Residential proxies</strong> (e.g. IPRoyal sticky sessions, ~$20–30/mo for the fleet).</li>
             </ul>
@@ -99,10 +99,10 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto px-6 py-6 flex items-center justify-between text-xs text-text-muted">
           <span>Telegram Outreach · {new Date().getFullYear()}</span>
           <div className="flex items-center gap-4">
-            <Link href="/login" className="hover:text-white">
+            <Link href="/login" className="hover:text-foreground">
               Log in
             </Link>
-            <Link href="/signup" className="hover:text-white">
+            <Link href="/signup" className="hover:text-foreground">
               Sign up
             </Link>
           </div>

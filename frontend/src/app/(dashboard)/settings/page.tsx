@@ -6,7 +6,7 @@ import SettingsForm from "@/components/settings/SettingsForm";
 export default async function SettingsPage() {
   if (!isSupabaseConfigured()) {
     return (
-      <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+      <main className="max-w-3xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
           <p className="text-text-muted text-sm">
@@ -14,7 +14,7 @@ export default async function SettingsPage() {
           </p>
         </div>
         <div className="bg-card-bg border border-card-border rounded-xl p-8 text-center">
-          <p className="font-medium text-white mb-2">Settings need Supabase.</p>
+          <p className="font-medium text-foreground mb-2">Settings need Supabase.</p>
           <p className="text-sm text-text-muted mb-4 max-w-lg mx-auto">
             You&apos;re in <strong className="text-yellow-400">local dev</strong>{" "}
             mode. Profile + preferences live in Postgres (Supabase). Set it up
@@ -22,7 +22,7 @@ export default async function SettingsPage() {
           </p>
           <Link
             href="/"
-            className="text-sm text-text-muted hover:text-white underline"
+            className="text-sm text-text-muted hover:text-foreground underline"
           >
             See docs/SETUP-SUPABASE.md
           </Link>
@@ -37,7 +37,7 @@ export default async function SettingsPage() {
   const loadError = res.ok ? null : res.error;
 
   return (
-    <main className="max-w-3xl mx-auto px-6 py-8 space-y-6">
+    <main className="max-w-3xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
         <p className="text-text-muted text-sm">

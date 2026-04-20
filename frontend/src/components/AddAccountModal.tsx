@@ -194,7 +194,7 @@ export default function AddAccountModal({ open, onClose, onSuccess }: Props) {
           </div>
           <button
             onClick={close}
-            className="text-text-muted hover:text-white text-2xl leading-none"
+            className="text-text-muted hover:text-foreground text-2xl leading-none"
             aria-label="close"
           >
             ×
@@ -383,7 +383,7 @@ export default function AddAccountModal({ open, onClose, onSuccess }: Props) {
           <button
             onClick={close}
             disabled={busy}
-            className="px-4 py-2 text-sm text-text-muted hover:text-white"
+            className="px-4 py-2 text-sm text-text-muted hover:text-foreground"
           >
             Cancel
           </button>

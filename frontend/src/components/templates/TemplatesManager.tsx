@@ -152,7 +152,7 @@ export default function TemplatesManager({
             <button
               type="button"
               onClick={reset}
-              className="text-xs text-text-muted hover:text-white"
+              className="text-xs text-text-muted hover:text-foreground"
             >
               cancel edit
             </button>

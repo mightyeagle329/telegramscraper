@@ -57,7 +57,7 @@ export default function SignupPage() {
             <h1 className="text-xl font-semibold">Check your email</h1>
             <p className="text-text-muted text-sm mt-3">
               We sent a confirmation link to{" "}
-              <span className="text-white">{email}</span>. Click it to finish
+              <span className="text-foreground">{email}</span>. Click it to finish
               creating your account.
             </p>
           </div>
@@ -121,7 +121,7 @@ export default function SignupPage() {
           </form>
           <p className="text-text-muted text-sm text-center mt-6">
             Already have an account?{" "}
-            <Link href="/login" className="text-white hover:underline">
+            <Link href="/login" className="text-foreground hover:underline">
               Log in
             </Link>
           </p>
