@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n/context";
 import type {
   Account,
   QueueSnapshotEntry,
@@ -9,6 +10,7 @@ import type {
 } from "@/lib/types";
 
 export default function CampaignsPage() {
+  const t = useT();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [sheets, setSheets] = useState<Record<string, number>>({});
   const [queue, setQueue] = useState<Record<string, QueueSnapshotEntry>>({});
@@ -138,10 +140,8 @@ export default function CampaignsPage() {
     <>
       <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
         <div>
-          <h1 className="text-2xl font-bold">Campaigns</h1>
-          <p className="text-text-muted text-sm">
-            Send DMs at scale across your sender fleet.
-          </p>
+          <h1 className="text-2xl font-bold">{t("campaigns.title")}</h1>
+          <p className="text-text-muted text-sm">{t("campaigns.subtitle")}</p>
         </div>
         {message ? (
           <div
@@ -156,7 +156,7 @@ export default function CampaignsPage() {
         ) : null}
 
         <section className="bg-card-bg border border-card-border rounded-xl p-5">
-          <h2 className="text-lg font-semibold mb-3">New campaign</h2>
+          <h2 className="text-lg font-semibold mb-3">{t("campaigns.new")}</h2>
 
           <div className="grid md:grid-cols-2 gap-6">
             <div className="space-y-4">
@@ -303,7 +303,7 @@ export default function CampaignsPage() {
               disabled={enqueueing}
               className="px-4 py-2 rounded-lg bg-accent-green/20 border border-accent-green/40 text-accent-green text-sm font-medium hover:bg-accent-green/30 disabled:opacity-50"
             >
-              {enqueueing ? "Enqueueing…" : "Enqueue campaign"}
+              {enqueueing ? t("campaigns.launching") : t("campaigns.launch")}
             </button>
           </div>
         </section>
@@ -361,7 +361,7 @@ export default function CampaignsPage() {
           </div>
 
           <div className="bg-card-bg border border-card-border rounded-xl p-5">
-            <h2 className="text-lg font-semibold mb-3">Recent sends</h2>
+            <h2 className="text-lg font-semibold mb-3">{t("campaigns.sends.title")}</h2>
             {sentLog.length === 0 ? (
               <div className="text-text-muted text-sm">No sends yet.</div>
             ) : (

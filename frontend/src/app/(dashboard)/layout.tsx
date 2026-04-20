@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 import DashboardNav from "@/components/DashboardNav";
+import WorkerHealthBanner from "@/components/WorkerHealthBanner";
 
 /**
  * Layout wrapping every protected dashboard page.
@@ -23,6 +24,7 @@ export default async function DashboardLayout({
     return (
       <div className="min-h-screen bg-background">
         <DashboardNav localDev />
+        <WorkerHealthBanner />
         {children}
       </div>
     );
@@ -43,6 +45,7 @@ export default async function DashboardLayout({
         email={user.email ?? ""}
         initial={(user.email ?? "?").charAt(0).toUpperCase()}
       />
+      <WorkerHealthBanner />
       {children}
     </div>
   );

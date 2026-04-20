@@ -27,12 +27,16 @@ export interface MonitorStatus {
   group_name?: string;
 }
 
+// gspread returns cells with whatever shape they have on the sheet. User IDs
+// land as numbers, names as strings, empty cells as empty strings. Coerce
+// with String(…) at every use site — never do .toLowerCase() / .includes()
+// without coercing first.
 export interface Member {
-  "User ID": string;
-  Username: string;
-  "First Name": string;
-  "Last Name": string;
-  Phone: string;
+  "User ID": string | number;
+  Username: string | number;
+  "First Name": string | number;
+  "Last Name": string | number;
+  Phone: string | number;
   "Scraped At": string;
   "Is New": string;
 }

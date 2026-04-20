@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import AddAccountModal from "@/components/AddAccountModal";
 import Pagination from "@/components/Pagination";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n/context";
 import type { Account, AccountStatus, WorkerStatus } from "@/lib/types";
 
 const STATUS_STYLES: Record<AccountStatus, string> = {
@@ -32,6 +33,7 @@ function warmupDay(startedAt: string | null): number | null {
 }
 
 export default function AccountsPage() {
+  const t = useT();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [workers, setWorkers] = useState<WorkerStatus>({});
   const [busy, setBusy] = useState<Record<string, string | null>>({});
@@ -95,10 +97,8 @@ export default function AccountsPage() {
     <>
       <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold">Accounts</h1>
-          <p className="text-text-muted text-sm">
-            Sender accounts — status, warm-up, daily quotas.
-          </p>
+          <h1 className="text-2xl font-bold">{t("accounts.title")}</h1>
+          <p className="text-text-muted text-sm">{t("accounts.subtitle")}</p>
         </div>
         {error ? (
           <div className="mb-4 px-4 py-2 bg-accent-red/10 border border-accent-red/30 text-accent-red rounded-lg text-sm">
@@ -106,23 +106,23 @@ export default function AccountsPage() {
           </div>
         ) : null}
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-          <SummaryCard label="Active" value={totals.active} />
-          <SummaryCard label="Warming" value={totals.warming} />
-          <SummaryCard label="Paused" value={totals.paused} />
-          <SummaryCard label="Banned" value={totals.banned} />
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4 mb-6">
+          <SummaryCard label={t("accounts.stat.active")} value={totals.active} />
+          <SummaryCard label={t("accounts.stat.warming")} value={totals.warming} />
+          <SummaryCard label={t("accounts.stat.paused")} value={totals.paused} />
+          <SummaryCard label={t("accounts.stat.banned")} value={totals.banned} />
           <SummaryCard
-            label="Today's DMs"
+            label={t("accounts.stat.today")}
             value={`${totals.dailySent} / ${totals.dailyLimit}`}
           />
         </div>
 
-        <div className="flex flex-wrap gap-3 mb-4">
+        <div className="flex flex-wrap gap-2 md:gap-3 mb-4">
           <button
             onClick={() => setAddOpen(true)}
             className="px-3 py-1.5 rounded-lg bg-accent-green/20 border border-accent-green/40 text-accent-green text-sm font-medium hover:bg-accent-green/30"
           >
-            + Add account
+            {t("accounts.add")}
           </button>
           <button
             onClick={() =>
@@ -131,7 +131,7 @@ export default function AccountsPage() {
             disabled={!!checkingAll}
             className="px-3 py-1.5 rounded-lg bg-card-bg border border-card-border text-sm hover:bg-card-border disabled:opacity-50"
           >
-            {checkingAll ? "Running health check…" : "Health check all"}
+            {checkingAll ? t("accounts.healthChecking") : t("accounts.healthCheckAll")}
           </button>
           <button
             onClick={() =>
@@ -139,7 +139,7 @@ export default function AccountsPage() {
             }
             className="px-3 py-1.5 rounded-lg bg-card-bg border border-card-border text-sm hover:bg-card-border"
           >
-            Start all workers
+            {t("accounts.startAll")}
           </button>
           <button
             onClick={() =>
@@ -147,27 +147,20 @@ export default function AccountsPage() {
             }
             className="px-3 py-1.5 rounded-lg bg-card-bg border border-card-border text-sm hover:bg-card-border"
           >
-            Stop all workers
+            {t("accounts.stopAll")}
           </button>
         </div>
 
         {loading ? (
-          <div className="bg-card-bg border border-card-border rounded-xl p-8 text-center text-text-muted">
-            Loading accounts…
+          <div className="card-elevated p-8 text-center text-text-muted">
+            {t("accounts.loading")}
           </div>
         ) : accounts.length === 0 ? (
-          <div className="bg-card-bg border border-card-border rounded-xl p-8 text-center text-text-muted">
-            <p className="font-medium text-foreground mb-2">No accounts yet.</p>
-            <p className="text-sm mb-4">
-              Click <strong>+ Add account</strong> above to onboard your first
-              sender (phone + IPRoyal sticky session + SMS code, all from this
-              page).
+          <div className="card-elevated p-8 text-center text-text-muted">
+            <p className="font-medium text-foreground mb-2">
+              {t("accounts.empty.title")}
             </p>
-            <p className="text-xs text-text-muted">
-              Prefer the terminal?{" "}
-              <code className="text-xs">python add_account.py</code> from the
-              backend folder also works.
-            </p>
+            <p className="text-sm mb-4">{t("accounts.empty.body")}</p>
           </div>
         ) : (
           <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
@@ -175,15 +168,15 @@ export default function AccountsPage() {
             <table className="w-full text-sm">
               <thead className="bg-card-border/50 text-text-muted text-xs uppercase">
                 <tr>
-                  <th className="text-left px-4 py-2">Account</th>
-                  <th className="text-left px-4 py-2">Status</th>
-                  <th className="text-left px-4 py-2">Worker</th>
-                  <th className="text-left px-4 py-2">Warm-up</th>
-                  <th className="text-left px-4 py-2">Today</th>
-                  <th className="text-left px-4 py-2">Total sent</th>
-                  <th className="text-left px-4 py-2">Proxy</th>
-                  <th className="text-left px-4 py-2">Last error</th>
-                  <th className="text-right px-4 py-2">Actions</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.account")}</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.status")}</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.worker")}</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.warmup")}</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.today")}</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.total")}</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.proxy")}</th>
+                  <th className="text-left px-4 py-2">{t("accounts.table.lastError")}</th>
+                  <th className="text-right px-4 py-2">{t("accounts.table.actions")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -247,7 +240,7 @@ export default function AccountsPage() {
                               disabled={!!b}
                               className="px-2 py-1 rounded-md border border-card-border text-xs hover:bg-card-border disabled:opacity-50"
                             >
-                              Resume
+                              {t("accounts.action.resume")}
                             </button>
                           ) : a.status !== "banned" ? (
                             <button
@@ -259,7 +252,7 @@ export default function AccountsPage() {
                               disabled={!!b}
                               className="px-2 py-1 rounded-md border border-card-border text-xs hover:bg-card-border disabled:opacity-50"
                             >
-                              Pause
+                              {t("accounts.action.pause")}
                             </button>
                           ) : null}
                           <button
@@ -271,7 +264,7 @@ export default function AccountsPage() {
                             disabled={!!b}
                             className="px-2 py-1 rounded-md border border-card-border text-xs hover:bg-card-border disabled:opacity-50"
                           >
-                            Check
+                            {t("accounts.action.check")}
                           </button>
                           <button
                             onClick={() => {
@@ -288,7 +281,7 @@ export default function AccountsPage() {
                             disabled={!!b}
                             className="px-2 py-1 rounded-md border border-accent-red/40 text-accent-red text-xs hover:bg-accent-red/10 disabled:opacity-50"
                           >
-                            Remove
+                            {t("accounts.action.remove")}
                           </button>
                         </div>
                       </td>

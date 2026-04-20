@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n/context";
 import type { Account, SentLogEntry } from "@/lib/types";
 
 export default function DashboardHome() {
+  const t = useT();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [recent, setRecent] = useState<SentLogEntry[]>([]);
   const [queue, setQueue] = useState<Record<string, { pending: number }>>({});
@@ -43,60 +45,51 @@ export default function DashboardHome() {
     banned: accounts.filter((a) => a.status === "banned").length,
     dailySent: accounts.reduce((s, a) => s + (a.daily_sent || 0), 0),
     dailyLimit: accounts.reduce((s, a) => s + (a.daily_limit || 0), 0),
-    queued: Object.values(queue).reduce(
-      (s, q) => s + (q?.pending ?? 0),
-      0
-    ),
+    queued: Object.values(queue).reduce((s, q) => s + (q?.pending ?? 0), 0),
   };
 
   return (
     <main className="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Overview</h1>
-        <p className="text-text-muted text-sm">
-          Fleet status and recent activity across your sender accounts.
-        </p>
+        <h1 className="text-2xl font-bold">{t("dashboard.title")}</h1>
+        <p className="text-text-muted text-sm">{t("dashboard.subtitle")}</p>
       </div>
 
       {error ? (
         <div className="px-4 py-2 bg-accent-red/10 border border-accent-red/30 text-accent-red rounded-lg text-sm">
-          {error} — is the Python backend running on port 8000?
+          {t("dashboard.error.backend", { error })}
         </div>
       ) : null}
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Stat label="Active senders" value={totals.active} />
-        <Stat label="Warming up" value={totals.warming} />
-        <Stat label="Paused / banned" value={totals.paused + totals.banned} />
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        <Stat label={t("dashboard.stat.active")} value={totals.active} />
+        <Stat label={t("dashboard.stat.warming")} value={totals.warming} />
         <Stat
-          label="Today's DMs"
+          label={t("dashboard.stat.paused")}
+          value={totals.paused + totals.banned}
+        />
+        <Stat
+          label={t("dashboard.stat.today")}
           value={`${totals.dailySent} / ${totals.dailyLimit}`}
         />
       </div>
 
       <section className="grid md:grid-cols-2 gap-6">
-        <div className="bg-card-bg border border-card-border rounded-xl p-5">
+        <div className="card-elevated p-5">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Queue</h2>
+            <h2 className="text-lg font-semibold">{t("dashboard.queue.title")}</h2>
             <Link
               href="/campaigns"
               className="text-xs text-text-muted hover:text-foreground"
             >
-              manage →
+              {t("nav.campaigns")} →
             </Link>
           </div>
           {loading ? (
-            <div className="text-text-muted text-sm">Loading…</div>
+            <div className="text-text-muted text-sm">…</div>
           ) : totals.queued === 0 ? (
             <p className="text-text-muted text-sm">
-              No DMs queued. Start a campaign from the{" "}
-              <Link
-                href="/campaigns"
-                className="text-foreground hover:underline"
-              >
-                Campaigns
-              </Link>{" "}
-              page.
+              {t("dashboard.queue.empty")}
             </p>
           ) : (
             <ul className="space-y-2 text-sm">
@@ -107,7 +100,7 @@ export default function DashboardHome() {
                 >
                   <span className="font-medium">{aid}</span>
                   <span className="text-text-muted">
-                    {q?.pending ?? 0} pending
+                    {t("dashboard.queue.pending", { n: q?.pending ?? 0 })}
                   </span>
                 </li>
               ))}
@@ -115,18 +108,22 @@ export default function DashboardHome() {
           )}
         </div>
 
-        <div className="bg-card-bg border border-card-border rounded-xl p-5">
+        <div className="card-elevated p-5">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-lg font-semibold">Recent sends</h2>
+            <h2 className="text-lg font-semibold">
+              {t("dashboard.recent.title")}
+            </h2>
             <Link
               href="/campaigns"
               className="text-xs text-text-muted hover:text-foreground"
             >
-              all →
+              {t("nav.campaigns")} →
             </Link>
           </div>
           {recent.length === 0 ? (
-            <p className="text-text-muted text-sm">No sends yet.</p>
+            <p className="text-text-muted text-sm">
+              {t("dashboard.recent.empty")}
+            </p>
           ) : (
             <ul className="space-y-1 text-xs font-mono max-h-64 overflow-y-auto">
               {recent
@@ -149,7 +146,7 @@ export default function DashboardHome() {
                           : e.status === "skipped"
                           ? "text-text-muted"
                           : e.status === "paused"
-                          ? "text-yellow-400"
+                          ? "text-accent-yellow"
                           : "text-accent-red"
                       }
                     >
@@ -162,23 +159,27 @@ export default function DashboardHome() {
         </div>
       </section>
 
-      <section className="bg-card-bg border border-card-border rounded-xl p-5">
-        <h2 className="text-lg font-semibold mb-3">Next actions</h2>
+      <section className="card-elevated p-5">
+        <h2 className="text-lg font-semibold mb-3">
+          {t("dashboard.actions.title")}
+        </h2>
         <ul className="grid md:grid-cols-3 gap-3 text-sm">
           <ActionCard
             href="/accounts"
-            title="Add sender accounts"
-            body={`${accounts.length}/10 connected.`}
+            title={t("dashboard.actions.addAccount.title")}
+            body={t("dashboard.actions.addAccount.body", {
+              count: accounts.length,
+            })}
           />
           <ActionCard
             href="/groups"
-            title="Scrape groups"
-            body="Pull members from Telegram groups you belong to."
+            title={t("dashboard.actions.scrape.title")}
+            body={t("dashboard.actions.scrape.body")}
           />
           <ActionCard
             href="/campaigns"
-            title="Launch a campaign"
-            body="Pick a source, write templates, enqueue DMs."
+            title={t("dashboard.actions.campaign.title")}
+            body={t("dashboard.actions.campaign.body")}
           />
         </ul>
       </section>
@@ -188,11 +189,11 @@ export default function DashboardHome() {
 
 function Stat({ label, value }: { label: string; value: number | string }) {
   return (
-    <div className="bg-card-bg border border-card-border rounded-xl p-4">
-      <div className="text-text-muted text-xs uppercase tracking-wide">
+    <div className="card-elevated p-3 md:p-4">
+      <div className="text-text-muted text-[11px] md:text-xs uppercase tracking-wide">
         {label}
       </div>
-      <div className="text-2xl font-bold mt-1">{value}</div>
+      <div className="text-xl md:text-2xl font-bold mt-1">{value}</div>
     </div>
   );
 }
