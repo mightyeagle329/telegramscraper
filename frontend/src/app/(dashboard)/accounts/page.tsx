@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import AddAccountModal from "@/components/AddAccountModal";
+import Pagination from "@/components/Pagination";
 import { api } from "@/lib/api";
 import type { Account, AccountStatus, WorkerStatus } from "@/lib/types";
 
@@ -37,6 +38,8 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   const refresh = useCallback(async () => {
     try {
@@ -82,6 +85,11 @@ export default function AccountsPage() {
     dailySent: accounts.reduce((s, a) => s + (a.daily_sent || 0), 0),
     dailyLimit: accounts.reduce((s, a) => s + (a.daily_limit || 0), 0),
   };
+
+  const paginatedAccounts = useMemo(
+    () => accounts.slice((page - 1) * pageSize, page * pageSize),
+    [accounts, page, pageSize]
+  );
 
   return (
     <>
@@ -163,6 +171,7 @@ export default function AccountsPage() {
           </div>
         ) : (
           <div className="bg-card-bg border border-card-border rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-card-border/50 text-text-muted text-xs uppercase">
                 <tr>
@@ -178,7 +187,7 @@ export default function AccountsPage() {
                 </tr>
               </thead>
               <tbody>
-                {accounts.map((a) => {
+                {paginatedAccounts.map((a) => {
                   const day = warmupDay(a.warmup_started_at);
                   const wstate = workers[a.id] ?? "stopped";
                   const b = busy[a.id];
@@ -288,6 +297,18 @@ export default function AccountsPage() {
                 })}
               </tbody>
             </table>
+            </div>
+            <Pagination
+              total={accounts.length}
+              page={page}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(n) => {
+                setPageSize(n);
+                setPage(1);
+              }}
+              label="accounts"
+            />
           </div>
         )}
 

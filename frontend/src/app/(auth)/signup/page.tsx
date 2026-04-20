@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useT } from "@/lib/i18n/context";
 
 export default function SignupPage() {
+  const t = useT();
   const router = useRouter();
 
   const [fullName, setFullName] = useState("");
@@ -33,8 +35,6 @@ export default function SignupPage() {
         setError(error.message);
         return;
       }
-      // If Supabase project requires email confirmation, `session` is null
-      // and the user needs to click the link. Otherwise land them straight in.
       if (!data.session) {
         setAwaitConfirm(true);
         return;
@@ -48,113 +48,111 @@ export default function SignupPage() {
 
   if (awaitConfirm) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-6 bg-background">
-        <div className="w-full max-w-sm text-center">
-          <Link href="/" className="font-bold text-xl">
-            Telegram Outreach
-          </Link>
-          <div className="bg-card-bg border border-card-border rounded-xl p-6 mt-6">
-            <h1 className="text-xl font-semibold">Check your email</h1>
-            <p className="text-text-muted text-sm mt-3">
-              We sent a confirmation link to{" "}
-              <span className="text-foreground">{email}</span>. Click it to finish
-              creating your account.
-            </p>
-          </div>
-        </div>
-      </div>
+      <Shell>
+        <h1 className="text-xl font-semibold">
+          {t("auth.signup.checkEmail.title")}
+        </h1>
+        <p className="text-text-muted text-sm mt-3">
+          {t("auth.signup.checkEmail.body", { email })}
+        </p>
+      </Shell>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-6 bg-background">
+    <Shell>
+      <h1 className="text-xl font-semibold">{t("auth.signup.title")}</h1>
+      <p className="text-text-muted text-sm mt-1">{t("auth.signup.subtitle")}</p>
+      <form onSubmit={handleSubmit} className="space-y-4 mt-5">
+        <Field label={`${t("auth.field.fullName")} ${t("auth.field.fullName.optional")}`}>
+          <input
+            type="text"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            className="input"
+          />
+        </Field>
+        <Field label={t("auth.field.email")}>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            autoFocus
+            className="input"
+          />
+        </Field>
+        <Field
+          label={`${t("auth.field.password")} — ${t("auth.field.password.hint")}`}
+        >
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={8}
+            required
+            className="input"
+          />
+        </Field>
+        {error ? <div className="text-accent-red text-sm">{error}</div> : null}
+        <button
+          type="submit"
+          disabled={busy}
+          className="w-full px-4 py-2 rounded-lg bg-accent-green/20 border border-accent-green/40 text-accent-green font-medium hover:bg-accent-green/30 disabled:opacity-50"
+        >
+          {busy ? t("auth.signup.loading") : t("auth.signup.submit")}
+        </button>
+      </form>
+      <p className="text-text-muted text-sm text-center mt-6">
+        {t("auth.signup.haveAccount")}{" "}
+        <Link href="/login" className="text-foreground hover:underline">
+          {t("nav.signIn")}
+        </Link>
+      </p>
+
+      <style>{`
+        .input{
+          width:100%;
+          background:var(--background,#0a0a0a);
+          border:1px solid var(--card-border,#27272a);
+          border-radius:.5rem;
+          padding:.5rem .75rem;
+          font-size:.875rem;
+          color:inherit;
+        }
+        .input:focus{outline:none;border-color:rgba(34,197,94,.5)}
+      `}</style>
+    </Shell>
+  );
+}
+
+function Shell({ children }: { children: React.ReactNode }) {
+  const t = useT();
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4 md:px-6 bg-background">
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
           <Link href="/" className="font-bold text-xl">
-            Telegram Outreach
+            {t("app.name")}
           </Link>
         </div>
-        <div className="bg-card-bg border border-card-border rounded-xl p-6">
-          <h1 className="text-xl font-semibold">Create your account</h1>
-          <p className="text-text-muted text-sm mt-1">
-            Free to start. No credit card.
-          </p>
-          <form onSubmit={handleSubmit} className="space-y-4 mt-5">
-            <Field label="Full name" optional>
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                className="input"
-              />
-            </Field>
-            <Field label="Email">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                autoFocus
-                className="input"
-              />
-            </Field>
-            <Field label="Password" hint="at least 8 characters">
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                minLength={8}
-                required
-                className="input"
-              />
-            </Field>
-            {error ? (
-              <div className="text-accent-red text-sm">{error}</div>
-            ) : null}
-            <button
-              type="submit"
-              disabled={busy}
-              className="w-full px-4 py-2 rounded-lg bg-accent-green/20 border border-accent-green/40 text-accent-green font-medium hover:bg-accent-green/30 disabled:opacity-50"
-            >
-              {busy ? "Creating account…" : "Sign up"}
-            </button>
-          </form>
-          <p className="text-text-muted text-sm text-center mt-6">
-            Already have an account?{" "}
-            <Link href="/login" className="text-foreground hover:underline">
-              Log in
-            </Link>
-          </p>
-        </div>
+        <div className="card-elevated p-5 md:p-6">{children}</div>
       </div>
-      <style>{`.input{width:100%;background:var(--background,#0a0a0a);border:1px solid var(--card-border,#27272a);border-radius:.5rem;padding:.5rem .75rem;font-size:.875rem;color:inherit}.input:focus{outline:none;border-color:rgba(34,197,94,.5)}`}</style>
     </div>
   );
 }
 
 function Field({
   label,
-  hint,
-  optional,
   children,
 }: {
   label: string;
-  hint?: string;
-  optional?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <label className="block">
       <span className="block text-xs uppercase text-text-muted mb-1">
         {label}
-        {optional ? (
-          <span className="normal-case text-text-muted/70 ml-1">
-            (optional)
-          </span>
-        ) : null}
-        {hint ? (
-          <span className="normal-case text-text-muted/70 ml-2">— {hint}</span>
-        ) : null}
       </span>
       {children}
     </label>

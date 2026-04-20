@@ -2,8 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useT } from "@/lib/i18n/context";
 
 export default function StatusBar() {
+  const t = useT();
   const [connected, setConnected] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -25,7 +27,7 @@ export default function StatusBar() {
       <span
         className={`w-2 h-2 rounded-full ${
           connected === null
-            ? "bg-yellow-500"
+            ? "bg-accent-yellow"
             : connected
             ? "bg-accent-green"
             : "bg-accent-red"
@@ -33,10 +35,10 @@ export default function StatusBar() {
       />
       <span className="text-text-muted">
         {connected === null
-          ? "Connecting..."
+          ? t("status.connecting")
           : connected
-          ? "Backend Connected"
-          : "Backend Offline"}
+          ? t("status.connected")
+          : t("status.offline")}
       </span>
     </div>
   );

@@ -29,26 +29,26 @@ export default function AddGroup({ onGroupAdded }: AddGroupProps) {
   };
 
   return (
-    <div className="bg-card-bg border border-card-border rounded-xl p-6 mb-6">
+    <div className="bg-card-bg border border-card-border rounded-xl p-4 md:p-6 mb-6">
       <h2 className="text-lg font-semibold mb-4">Add New Group</h2>
-      <div className="flex gap-3">
+      <div className="flex flex-col sm:flex-row gap-3">
         <input
           type="text"
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           placeholder="https://t.me/group_name or invite link"
-          className="flex-1 bg-background border border-card-border rounded-lg px-4 py-3 text-foreground placeholder:text-text-muted focus:outline-none focus:border-accent-purple transition-colors"
+          className="min-w-0 w-full sm:flex-1 bg-background border border-card-border rounded-lg px-4 py-3 text-foreground placeholder:text-text-muted focus:outline-none focus:border-accent-purple transition-colors"
         />
         <button
           onClick={handleAdd}
           disabled={loading || !url.trim()}
-          className="bg-accent-purple hover:bg-accent-purple/80 disabled:opacity-50 text-foreground px-6 py-3 rounded-lg font-medium transition-colors whitespace-nowrap"
+          className="w-full sm:w-auto bg-accent-purple hover:bg-accent-purple/80 disabled:opacity-50 text-foreground px-6 py-3 rounded-lg font-medium transition-colors whitespace-nowrap"
         >
           {loading ? "Adding..." : "+ Add"}
         </button>
       </div>
-      {error && <p className="text-accent-red text-sm mt-2">{error}</p>}
+      {error && <p className="text-accent-red text-sm mt-2 break-words">{error}</p>}
     </div>
   );
 }

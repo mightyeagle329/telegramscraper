@@ -4,16 +4,18 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { useT } from "@/lib/i18n/context";
+import LanguageToggle from "./LanguageToggle";
 import StatusBar from "./StatusBar";
 import ThemeToggle from "./ThemeToggle";
 
-const links = [
-  { href: "/dashboard", label: "Overview" },
-  { href: "/groups", label: "Groups" },
-  { href: "/contacts", label: "Contacts" },
-  { href: "/accounts", label: "Accounts" },
-  { href: "/templates", label: "Templates" },
-  { href: "/campaigns", label: "Campaigns" },
+const linkSpecs: { href: string; key: string }[] = [
+  { href: "/dashboard", key: "nav.overview" },
+  { href: "/groups", key: "nav.groups" },
+  { href: "/contacts", key: "nav.contacts" },
+  { href: "/accounts", key: "nav.accounts" },
+  { href: "/templates", key: "nav.templates" },
+  { href: "/campaigns", key: "nav.campaigns" },
 ];
 
 interface Props {
@@ -23,11 +25,13 @@ interface Props {
 }
 
 export default function DashboardNav({ email, initial, localDev }: Props) {
+  const t = useT();
   const pathname = usePathname();
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const links = linkSpecs.map(({ href, key }) => ({ href, label: t(key) }));
 
   // Close mobile menu on navigation
   useEffect(() => {
@@ -77,6 +81,9 @@ export default function DashboardNav({ email, initial, localDev }: Props) {
         </nav>
 
         <div className="flex items-center gap-2 md:gap-3">
+          <div className="hidden md:block">
+            <LanguageToggle />
+          </div>
           <div className="hidden sm:block">
             <ThemeToggle />
           </div>
@@ -89,7 +96,7 @@ export default function DashboardNav({ email, initial, localDev }: Props) {
               title="Supabase not configured — running without auth."
               className="hidden sm:inline text-xs px-2 py-1 rounded-full bg-accent-yellow/15 text-accent-yellow border border-accent-yellow/30"
             >
-              local dev
+              {t("nav.localDev")}
             </span>
           ) : (
             <div className="relative">
@@ -113,14 +120,14 @@ export default function DashboardNav({ email, initial, localDev }: Props) {
                     onClick={() => setMenuOpen(false)}
                     className="block px-3 py-2 text-sm hover:bg-card-border/40"
                   >
-                    Settings
+                    {t("nav.settings")}
                   </Link>
                   <button
                     onClick={signOut}
                     disabled={signingOut}
                     className="w-full text-left px-3 py-2 text-sm hover:bg-card-border/40 disabled:opacity-50"
                   >
-                    {signingOut ? "Signing out…" : "Sign out"}
+                    {signingOut ? t("auth.login.loading") : t("nav.signOut")}
                   </button>
                 </div>
               ) : null}
@@ -168,7 +175,8 @@ export default function DashboardNav({ email, initial, localDev }: Props) {
                 {label}
               </Link>
             ))}
-            <div className="pt-2 mt-1 border-t border-card-border/60 flex items-center justify-between gap-3 px-1">
+            <div className="pt-2 mt-1 border-t border-card-border/60 flex items-center justify-between gap-3 px-1 flex-wrap">
+              <LanguageToggle />
               <ThemeToggle />
               <StatusBar />
             </div>

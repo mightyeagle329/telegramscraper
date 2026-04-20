@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
+import Pagination from "@/components/Pagination";
 import type { Member } from "@/lib/types";
 
 export default function ContactsPage() {
@@ -14,6 +15,8 @@ export default function ContactsPage() {
   const [loadingSheets, setLoadingSheets] = useState(true);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // Load the list of scraped groups on mount.
   useEffect(() => {
@@ -82,6 +85,16 @@ export default function ContactsPage() {
       );
     });
   }, [members, query, onlyWithUsername]);
+
+  // Reset to first page whenever filters change.
+  useEffect(() => {
+    setPage(1);
+  }, [query, onlyWithUsername, group]);
+
+  const paginated = useMemo(
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize]
+  );
 
   const totalSheets = Object.keys(sheets).length;
   const totalMembers = Object.values(sheets).reduce((s, n) => s + n, 0);
@@ -165,7 +178,7 @@ export default function ContactsPage() {
             <>
               {/* Mobile: cards */}
               <ul className="md:hidden divide-y divide-card-border/40">
-                {filtered.slice(0, 200).map((m) => (
+                {paginated.map((m) => (
                   <li key={m["User ID"]} className="p-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -204,7 +217,7 @@ export default function ContactsPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.slice(0, 500).map((m) => (
+                    {paginated.map((m) => (
                       <tr
                         key={m["User ID"]}
                         className="border-t border-card-border/40 hover:bg-card-border/20"
@@ -249,13 +262,18 @@ export default function ContactsPage() {
                     ))}
                   </tbody>
                 </table>
-                {filtered.length > 500 ? (
-                  <div className="px-4 py-3 text-xs text-text-muted border-t border-card-border/40 text-center">
-                    Showing first 500 of {filtered.length.toLocaleString()}.
-                    Use the search box to narrow down.
-                  </div>
-                ) : null}
               </div>
+              <Pagination
+                total={filtered.length}
+                page={page}
+                pageSize={pageSize}
+                onPageChange={setPage}
+                onPageSizeChange={(n) => {
+                  setPageSize(n);
+                  setPage(1);
+                }}
+                label="contacts"
+              />
             </>
           )}
         </div>
