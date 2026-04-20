@@ -1,29 +1,70 @@
-# Python
-backend/venv/
-backend/__pycache__/
-backend/*.pyc
-backend/*.pyo
+# ─── Private files (never push) ─────────────────────────────────────
+# Client-facing proposal PDF — not part of the source code.
+Telegram_Outreach_Proposal.pdf
+*.pdf
+# Any personal notes / scratch files.
+NOTES.md
+TODO.md
+
+# ─── Environment / secrets ──────────────────────────────────────────
+backend/.env
+# Google OAuth client secret
+backend/credentials.json
+# Google OAuth refresh token
+backend/token.json
+frontend/.env*
+!frontend/.env.local.example
+.env
+.env.local
+
+# ─── Runtime state (Python backend) ─────────────────────────────────
 backend/*.session
 backend/*.session-journal
-backend/token.json
-backend/credentials.json
+backend/sessions/              # Phase 1 per-account Telethon sessions
 backend/groups.json
-backend/.env
+backend/accounts.json
+backend/queue.json
+backend/sent_log.json
+backend/warmup_groups.json
 
-# Node / Next.js
+# ─── Python build artifacts ─────────────────────────────────────────
+backend/venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ─── Node / Next.js build artifacts ─────────────────────────────────
 frontend/node_modules/
 frontend/.next/
 frontend/out/
 frontend/build/
-frontend/.env*
-!frontend/.env.local.example
+frontend/tsconfig.tsbuildinfo
+**/node_modules/
 
-# OS
+# ─── Fly.io / Vercel ────────────────────────────────────────────────
+.fly/
+.vercel/
+
+# ─── OS ─────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# IDE
+# ─── IDE / editor ───────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
+*.swn
+
+# ─── Claude Code local config ───────────────────────────────────────
+.claude/
+CLAUDE.local.md
+
+# ─── Logs ───────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

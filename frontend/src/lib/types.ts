@@ -36,3 +36,71 @@ export interface Member {
   "Scraped At": string;
   "Is New": string;
 }
+
+// -------- Phase 1 --------
+
+export type AccountStatus = "warming" | "active" | "paused" | "banned";
+
+export interface AccountHealth {
+  connected?: boolean;
+  last_check_at?: string | null;
+  restricted?: boolean;
+}
+
+export interface Account {
+  id: string;
+  label: string;
+  phone: string;
+  status: AccountStatus;
+  warmup_started_at: string | null;
+  daily_limit: number;
+  daily_sent: number;
+  total_sent: number;
+  last_send_at: string | null;
+  last_error: string | null;
+  last_error_at: string | null;
+  proxy_host: string | null;
+  proxy_port: number | null;
+  proxy_type: string | null;
+  health: AccountHealth;
+}
+
+export interface QueueSnapshotEntry {
+  pending: number;
+  next_targets: { user_id: number; username: string }[];
+}
+
+export interface SentLogEntry {
+  account_id: string;
+  target_user_id: number;
+  target_username?: string;
+  campaign?: string;
+  message_id?: number;
+  status: "sent" | "skipped" | "paused" | "error";
+  reason?: string;
+  timestamp: string;
+}
+
+export interface WorkerStatus {
+  [account_id: string]: "running" | "paused" | "stopped";
+}
+
+export interface SignupStartResponse {
+  signup_token: string;
+  state: "awaiting_code";
+  expires_in_s: number;
+}
+
+export interface SignupStepResponse {
+  state: "awaiting_code" | "awaiting_password" | "completed";
+  needs_password?: boolean;
+  account?: Account;
+}
+
+export interface ProxyInput {
+  type: "socks5" | "socks4" | "http";
+  host: string;
+  port: number;
+  username?: string | null;
+  password?: string | null;
+}

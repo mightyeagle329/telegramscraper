@@ -5,10 +5,9 @@ import { api } from "@/lib/api";
 import type { Group } from "@/lib/types";
 import AddGroup from "@/components/AddGroup";
 import GroupTable from "@/components/GroupTable";
-import StatusBar from "@/components/StatusBar";
 import MonitoringPanel from "@/components/MonitoringPanel";
 
-export default function Dashboard() {
+export default function GroupsPage() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -28,22 +27,14 @@ export default function Dashboard() {
   }, [fetchGroups]);
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b border-card-border bg-card-bg/50 backdrop-blur-sm sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Telegram Group Scraper</h1>
-            <p className="text-text-muted text-sm">
-              Extract group members for outreach
-            </p>
-          </div>
-          <StatusBar />
-        </div>
-      </header>
-
-      {/* Main Content */}
+    <>
       <main className="max-w-6xl mx-auto px-6 py-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold">Groups</h1>
+          <p className="text-text-muted text-sm">
+            Extract group members for outreach.
+          </p>
+        </div>
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-card-bg border border-card-border rounded-xl p-5">
@@ -81,6 +72,6 @@ export default function Dashboard() {
           <GroupTable groups={groups} onRefresh={fetchGroups} />
         )}
       </main>
-    </div>
+    </>
   );
 }
