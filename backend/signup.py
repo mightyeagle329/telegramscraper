@@ -283,6 +283,17 @@ async def _finalize(pending: _Pending) -> dict:
 
         _pending.pop(pending.token, None)
 
+    # Auto-start the sender worker for this new account so the operator
+    # doesn't have to click "Start all workers" after every signup. The
+    # worker will idle during warm-up (can_send returns False until day 8)
+    # but this guarantees it's ready the moment the daily limit opens.
+    try:
+        import sender  # local import to avoid a cycle at module load time
+
+        sender.start_worker(aid)
+    except Exception as e:
+        logger.warning(f"[{aid}] could not auto-start sender worker: {e}")
+
     logger.info(f"[{aid}] signup complete ({pending.phone})")
     return {"state": "completed", "account": public_view(record)}
 

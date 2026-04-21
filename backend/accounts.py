@@ -193,7 +193,16 @@ def mark_error(account: dict[str, Any], error: str, pause: bool = False) -> None
 
 
 def public_view(account: dict[str, Any]) -> dict[str, Any]:
-    """Redacted account dict safe to return via the API (no creds)."""
+    """Account dict returned by the API.
+
+    This is a single-user / per-tenant dashboard, so the dashboard operator
+    needs to see their own proxy credentials (to copy back into the wizard
+    or to a provider console if they want to rotate). We include username
+    and password here — the frontend keeps the password masked by default
+    with an explicit reveal click.
+
+    Still stripped: `api_hash` (not needed in the UI), session path.
+    """
     proxy = account.get("proxy") or {}
     return {
         "id": account["id"],
@@ -210,5 +219,7 @@ def public_view(account: dict[str, Any]) -> dict[str, Any]:
         "proxy_host": proxy.get("host"),
         "proxy_port": proxy.get("port"),
         "proxy_type": proxy.get("type"),
+        "proxy_username": proxy.get("username"),
+        "proxy_password": proxy.get("password"),
         "health": account.get("health", {}),
     }

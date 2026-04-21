@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import AddAccountModal from "@/components/AddAccountModal";
 import Pagination from "@/components/Pagination";
+import ProxyCell from "@/components/ProxyCell";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n/context";
 import type { Account, AccountStatus, WorkerStatus } from "@/lib/types";
@@ -220,16 +221,48 @@ export default function AccountsPage() {
                       <td className="px-4 py-3 text-text-muted">
                         {a.total_sent}
                       </td>
-                      <td className="px-4 py-3 text-text-muted text-xs">
-                        {a.proxy_host
-                          ? `${a.proxy_type}://${a.proxy_host}:${a.proxy_port}`
-                          : "direct"}
+                      <td className="px-4 py-3">
+                        <ProxyCell
+                          type={a.proxy_type}
+                          host={a.proxy_host}
+                          port={a.proxy_port}
+                          username={a.proxy_username ?? null}
+                          password={a.proxy_password ?? null}
+                        />
                       </td>
                       <td className="px-4 py-3 text-xs text-accent-red max-w-[220px] truncate">
                         {a.last_error ?? "—"}
                       </td>
                       <td className="px-4 py-3 text-right">
-                        <div className="inline-flex gap-1">
+                        <div className="inline-flex flex-wrap gap-1 justify-end">
+                          {wstate === "running" ? (
+                            <button
+                              onClick={() =>
+                                run(a.id, "stop-worker", () =>
+                                  api.stopWorker(a.id)
+                                )
+                              }
+                              disabled={!!b}
+                              title="Stop this account's sender worker"
+                              className="px-2 py-1 rounded-md border border-card-border text-xs hover:bg-card-border disabled:opacity-50"
+                            >
+                              Stop
+                            </button>
+                          ) : a.status !== "banned" ? (
+                            <button
+                              onClick={() =>
+                                run(a.id, "start-worker", () =>
+                                  api.startWorker(a.id)
+                                )
+                              }
+                              disabled={!!b}
+                              title="Start this account's sender worker"
+                              className="px-2 py-1 rounded-md border border-accent-green/40 text-accent-green text-xs hover:bg-accent-green/10 disabled:opacity-50"
+                            >
+                              Start
+                            </button>
+                          ) : null}
+
                           {a.status === "paused" ? (
                             <button
                               onClick={() =>
@@ -255,6 +288,7 @@ export default function AccountsPage() {
                               {t("accounts.action.pause")}
                             </button>
                           ) : null}
+
                           <button
                             onClick={() =>
                               run(a.id, "health", () =>
@@ -266,6 +300,7 @@ export default function AccountsPage() {
                           >
                             {t("accounts.action.check")}
                           </button>
+
                           <button
                             onClick={() => {
                               if (

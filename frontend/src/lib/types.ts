@@ -66,6 +66,8 @@ export interface Account {
   proxy_host: string | null;
   proxy_port: number | null;
   proxy_type: string | null;
+  proxy_username?: string | null;
+  proxy_password?: string | null;
   health: AccountHealth;
 }
 
