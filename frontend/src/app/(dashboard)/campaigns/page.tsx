@@ -59,8 +59,14 @@ export default function CampaignsPage() {
     return () => clearInterval(interval);
   }, [refresh]);
 
+  // Accounts that are selectable for a campaign. "warming" stays eligible
+  // because queued items will just wait until the account hits day 8 of
+  // warm-up; "paused" and "banned" are hard-excluded.
   const eligibleAccounts = useMemo(
-    () => accounts.filter((a) => a.status === "active"),
+    () =>
+      accounts.filter(
+        (a) => a.status === "active" || a.status === "warming"
+      ),
     [accounts]
   );
 
@@ -190,31 +196,42 @@ export default function CampaignsPage() {
                     </div>
                   ) : (
                     accounts.map((a) => {
-                      const active = a.status === "active";
+                      // Allow selecting warming + active. Hard-block paused/banned.
+                      const selectable =
+                        a.status === "active" || a.status === "warming";
+                      const isWarming = a.status === "warming";
                       const selected = selectedAccountIds.includes(a.id);
                       return (
                         <label
                           key={a.id}
                           className={`flex items-center justify-between gap-2 px-2 py-1 rounded text-sm ${
-                            active
+                            selectable
                               ? "cursor-pointer hover:bg-card-border/30"
                               : "opacity-50 cursor-not-allowed"
                           }`}
                         >
-                          <span className="flex items-center gap-2">
+                          <span className="flex items-center gap-2 min-w-0">
                             <input
                               type="checkbox"
-                              disabled={!active}
+                              disabled={!selectable}
                               checked={selected}
                               onChange={() => toggleAccount(a.id)}
                             />
-                            <span className="font-medium">{a.label}</span>
-                            <span className="text-text-muted text-xs">
-                              ({a.id} · {a.status})
+                            <span className="font-medium truncate">{a.label}</span>
+                            <span className="text-text-muted text-xs shrink-0">
+                              ({a.id})
                             </span>
+                            {isWarming ? (
+                              <span
+                                title="In warm-up — queued DMs will start on day 8"
+                                className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent-yellow/15 text-accent-yellow border border-accent-yellow/30 shrink-0"
+                              >
+                                warming
+                              </span>
+                            ) : null}
                           </span>
-                          <span className="text-xs text-text-muted">
-                            {a.daily_sent}/{a.daily_limit} today
+                          <span className="text-xs text-text-muted shrink-0">
+                            {a.daily_sent}/{a.daily_limit}
                           </span>
                         </label>
                       );
