@@ -1,303 +1,413 @@
-# Telegram Group Member Scraper
+# Telegram Outreach Automation
 
-A tool to extract member data from Telegram groups and channels, export it to Google Sheets, and monitor for new users automatically. Includes a web dashboard for easy management.
-
-## Features
-
-- **Two scraping modes:**
-  - **Scrape Members** — Extracts the full member list from supergroups
-  - **Scrape Messages** — Extracts unique users from message history (works around Telegram's broadcast channel restrictions, auto-detects linked discussion groups)
-- **Auto-export to Google Sheets** — One worksheet per group, plus a Dashboard summary tab
-- **Deduplication** — Existing members are never re-exported; only new users are appended
-- **New user monitoring** — Automatic periodic scans with new users marked as "NEW" in the sheet
-- **Mode-aware monitoring** — Uses whichever scrape mode you last clicked for each group
-- **Persistent state** — Groups and monitoring settings survive backend restarts
-- **Resume monitoring on restart** — Monitors auto-restart when the backend comes back up
-- **Web dashboard** — Dark-themed Next.js UI to manage everything
-- **Rate-limit handling** — Automatic retries on Telegram `FloodWaitError`
-- **Supports invite links** — `t.me/+...`, `t.me/joinchat/...`, `tg://join?invite=...`, and public URLs
-
-## Architecture
+Multi-account Telegram outreach platform. Scrape members from groups, warm up sender accounts automatically, and send personalised DMs at scale with random delays, per-account proxies, and auto-recovery — all from a multi-tenant web dashboard.
 
 ```
-telegram_bot/
-├── backend/                  # Python FastAPI server
-│   ├── main.py               # API endpoints + lifespan startup
-│   ├── scraper.py            # Telethon scraping (members & messages)
-│   ├── sheets.py             # Google Sheets export (OAuth2)
-│   ├── monitor.py            # APScheduler background monitoring
-│   ├── storage.py            # JSON persistence for groups
-│   ├── models.py             # Pydantic request/response models
-│   ├── config.py             # Environment variables
-│   ├── requirements.txt
-│   ├── .env.example
-│   ├── credentials.json      # Google OAuth client (you provide)
-│   ├── token.json            # Auto-generated after Google login
-│   ├── session.session       # Auto-generated after Telegram login
-│   └── groups.json           # Auto-generated persistent state
-├── frontend/                 # Next.js 16 dashboard (React 19 + Tailwind)
-│   └── src/
-│       ├── app/
-│       │   ├── layout.tsx
-│       │   ├── page.tsx      # Main dashboard
-│       │   └── globals.css
-│       ├── components/
-│       │   ├── AddGroup.tsx         # Add group form
-│       │   ├── GroupTable.tsx       # Groups list with scrape/monitor buttons
-│       │   ├── MonitoringPanel.tsx  # Active monitor summary
-│       │   └── StatusBar.tsx        # Backend connection indicator
-│       └── lib/
-│           ├── api.ts        # API client
-│           └── types.ts      # TypeScript types
-├── .gitignore
-└── README.md
+┌────────────────────────────────────────────────────────────────────────┐
+│  Next.js 16 dashboard                                                  │
+│  Landing · Auth · Overview · Groups · Contacts · Accounts · Templates  │
+│  Campaigns · Settings · Dark/Light · EN/PT/ES                          │
+└───────────────────────────┬────────────────────────────────────────────┘
+                            │ REST + Supabase Auth cookies
+                            ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│  Python FastAPI worker                                                 │
+│  Scraper · Signup wizard · Safe sender · Warm-up · Error handler       │
+│  Health checks · Per-account Telethon client pool w/ SOCKS5 proxies    │
+└──────────┬─────────────────────────────────────────┬───────────────────┘
+           │                                         │
+           ▼                                         ▼
+  ┌────────────────┐                       ┌────────────────────┐
+  │  Supabase      │                       │  Google Sheets     │
+  │  Postgres+RLS  │                       │  scraped contacts  │
+  │  Auth          │                       └────────────────────┘
+  └────────────────┘
 ```
 
-## Prerequisites
+## What it does
 
-- **Python 3.10+** (3.12 recommended; 3.13 may have wheel issues on Windows)
-- **Node.js 18+**
-- A **Telegram account** with API credentials from https://my.telegram.org
-- A **Google Cloud project** with OAuth client credentials
-- A **Google Sheet** the account can access
+**Phase 0 — Data collection**
+- Scrape full member lists from supergroups
+- Scrape unique senders from message history (works on broadcast channels too — auto-detects linked discussion groups)
+- Auto-export to Google Sheets with deduplication
+- Background monitor for new members (per-group, resumable)
 
-## Setup
+**Phase 1 — Multi-account sender**
+- Up to 10 Telegram accounts managed from one dashboard
+- Per-account residential or mobile proxy (SOCKS5 / SOCKS4 / HTTP)
+- Web-based SMS signup wizard (3-step: phone+proxy → code → optional 2FA)
+- 7-day warm-up: each account joins groups, reads messages, reacts — no DMs
+- Daily DM ladder: 0 → 3 → 5 → 10 → 15 → 20 → 30 → 40 → 50 over ~21 days
+- Safe sender: random 45–180s delays, unique invisible suffix per message, weighted template rotation
+- Optional send-delete (deletes our copy N seconds after sending)
+- Auto-pause on `PeerFloodError` (48h cooldown)
+- Auto-pause on long `FloodWaitError` (respects Telegram's exact wait)
+- Auto-ban detection (`PhoneNumberBannedError`, `UserDeactivatedBanError`)
+- Per-account health checks every 30 min
+- Queue persisted across restarts
 
-### Step 1: Telegram API Credentials
+**Dashboard**
+- Public landing page
+- Email/password signup, login, password reset via Supabase Auth
+- Protected dashboard with mobile-responsive nav
+- 7 pages: Overview · Groups · Contacts · Accounts · Templates · Campaigns · Settings
+- Worker health banner (yellow/red) when any account is paused/banned
+- Dark · Light · System theme
+- English · Português · Español translations
+- Pagination + sort + search + CSV export on all data tables
+- Inline-edit account friendly names
 
-1. Go to https://my.telegram.org and log in
-2. Click **"API development tools"**
-3. Create an app (App title: anything, Short name: anything, Platform: Desktop, URL: leave blank)
-4. Copy the **API ID** (a number) and **API Hash** (a hex string)
+## Stack
 
-The Telegram account used must be a member of every group you want to scrape.
+- **Frontend**: Next.js 16 (App Router, Turbopack) + React 19 + Tailwind 4 + TypeScript
+- **Backend**: Python 3.12 + FastAPI + Telethon + APScheduler
+- **Database**: Supabase (Postgres + RLS + Auth)
+- **Contacts store**: Google Sheets (migrating to Supabase in Phase 2)
+- **Proxies**: IPRoyal residential sticky sessions, mobile proxies (fxdx.in and compatible)
+- **Deployment**: Vercel (frontend) + Fly.io (backend + volume) + Supabase (DB+Auth)
 
-### Step 2: Google OAuth Credentials
+## Quick start (local, no Supabase, no cloud)
 
-This project uses OAuth2 (personal Google login), not a service account, to work around organizations that block service account key creation.
+Two terminals. Everything runs on your machine.
 
-1. Go to https://console.cloud.google.com
-2. Create a new project
-3. **Enable APIs** (APIs & Services > Library):
-   - Enable **Google Sheets API**
-   - Enable **Google Drive API**
-4. **Configure OAuth consent screen** (APIs & Services > OAuth consent screen):
-   - Audience: **Internal** (or **External** if Internal is unavailable)
-   - Fill in app name and support email, leave the rest as defaults
-5. **Create OAuth Client** (APIs & Services > Credentials > + Create Credentials > OAuth client ID):
-   - Application type: **Desktop app**
-   - Name: anything
-   - Click **Create**, then **Download JSON**
-6. Save the downloaded file as `backend/credentials.json`
-
-### Step 3: Backend
+### Terminal 1 — Python backend
 
 ```bash
 cd backend
-
-# Create a virtual environment
 python -m venv venv
-
-# Activate it
 source venv/bin/activate        # Linux/Mac
-venv\Scripts\activate           # Windows
-
-# Install dependencies
+# venv\Scripts\activate         # Windows
 pip install -r requirements.txt
 
-# Create .env from the template
-cp .env.example .env
-```
-
-Edit `backend/.env` with your values:
-
-```env
-TELEGRAM_API_ID=1234567
-TELEGRAM_API_HASH=abcdef0123456789abcdef0123456789
-TELEGRAM_PHONE=+1234567890
-GOOGLE_SHEET_URL=https://docs.google.com/spreadsheets/d/your_sheet_id/edit
-GOOGLE_CREDENTIALS_FILE=credentials.json
-MONITOR_INTERVAL=300
-FRONTEND_URL=http://localhost:3000
-```
-
-Start the server:
-
-```bash
+cp .env.example .env             # then edit with your Telegram creds
 python main.py
 ```
 
-**First run only — two one-time steps:**
+On first run:
+1. Your browser opens a Google OAuth page (for Google Sheets). Sign in with the account that owns your target Google Sheet → creates `backend/token.json`.
+2. The terminal prompts for a Telegram SMS code (for the scraper account). Enter the code → creates `backend/session.session`.
 
-1. **Google login**: A browser window opens automatically. Sign in with the Google account that has access to your sheet and click **Allow**. This creates `token.json`.
-2. **Telegram login**: The terminal prompts for a verification code. Telegram sends this code to the app of the phone number in `.env`. Enter the code in the terminal. This creates `session.session`.
+Backend listens on `http://localhost:8000`.
 
-Both are saved and will **not** be required on subsequent runs.
-
-The backend runs on **http://localhost:8000**.
-
-### Step 4: Frontend
+### Terminal 2 — Next.js dashboard
 
 ```bash
 cd frontend
-
-# Install dependencies
 npm install
-
-# (Optional) custom backend URL
-cp .env.local.example .env.local
-
-# Start the dev server
+# DO NOT create .env.local — staying empty keeps the app in local-dev mode
 npm run dev
 ```
 
-The dashboard runs on **http://localhost:3000**.
+Open `http://localhost:3000` — redirects straight to `/dashboard` (no login needed in local mode). A yellow **local dev** badge appears in the nav to remind you.
 
-## Usage
+See [docs/RUN-LOCALLY.md](docs/RUN-LOCALLY.md) for troubleshooting.
 
-### Adding a group
+## Full setup (Supabase + production deploy)
 
-1. Open http://localhost:3000
-2. Paste a Telegram group URL into **"Add New Group"** and click **+ Add**
-   - Public: `https://t.me/Richsweeps` or `@Richsweeps`
-   - Invite link: `https://t.me/+XFGgPSo0m-Q0ZDZh` or `tg://join?invite=XFGgPSo0m-Q0ZDZh`
-3. The group appears in the **Tracked Groups** table
+Walkthrough: [docs/SETUP-SUPABASE.md](docs/SETUP-SUPABASE.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-### Scraping members
+The short version:
+1. Create a Supabase project, run the two SQL files in `supabase/migrations/` in the SQL editor.
+2. Put the Supabase URL + keys in `frontend/.env.local` and, eventually, in Vercel and Fly env vars.
+3. Deploy backend to Fly.io (`flyctl launch` in `backend/` — `Dockerfile` and `fly.toml` are ready).
+4. Deploy frontend to Vercel (root directory = `frontend`).
+5. Point Vercel's `NEXT_PUBLIC_API_URL` at the Fly URL.
 
-Two buttons are available for each group:
+## Prerequisites
 
-- **Scrape Members** (purple) — Gets the full member list. Works for **supergroups**. For broadcast channels, Telegram only exposes admins unless your account is an admin.
-- **Scrape Messages** (blue) — Scans the last 5000 messages and extracts users who posted. Use this for **broadcast channels** where the member list is restricted. If the channel has a linked discussion group, it automatically scrapes that instead.
+- **Python 3.10+** (3.12 recommended)
+- **Node.js 18+** (for Next.js 16)
+- **Telegram account** with API credentials from https://my.telegram.org
+- **Google Cloud project** with OAuth client credentials (for Sheets)
+- **Google Sheet** the account can access
+- *(Optional)* **Supabase project** for auth + multi-tenant
+- *(Phase 1)* **Residential or mobile proxies** (IPRoyal ~$20–30/mo covers 10 accounts)
+- *(Phase 1)* **Phone numbers** for sender accounts — physical SIMs recommended for 2–3 anchors, virtual from 5sim for the rest
 
-Both modes save to the same Google Sheet with identical columns. The "Scrape Messages" mode only saves **user data**, not message content.
+## Project structure
 
-### Monitoring for new users
+```
+telegram_bot/
+├── backend/                          Python FastAPI worker
+│   ├── main.py                       API routes + lifespan + scheduled jobs
+│   ├── scraper.py                    Phase 0 Telethon scraping (members + messages)
+│   ├── sheets.py                     Google Sheets export
+│   ├── monitor.py                    APScheduler background monitor
+│   ├── storage.py                    JSON persistence for groups
+│   ├── accounts.py                   Phase 1 account registry + warm-up ladder
+│   ├── client_pool.py                Per-account Telethon clients with proxies
+│   ├── sender.py                     Safe sender: queue, delays, templating
+│   ├── warmup.py                     Warm-up worker (joins, reads, reactions)
+│   ├── error_handler.py              Classifies FloodWait/PeerFlood/Banned/etc.
+│   ├── signup.py                     Web-based SMS signup flow (stateful)
+│   ├── add_account.py                CLI signup (alternative to web wizard)
+│   ├── models.py                     Pydantic request/response models
+│   ├── config.py                     Environment variables
+│   ├── requirements.txt
+│   ├── Dockerfile                    Fly.io deployment image
+│   ├── fly.toml                      Fly.io app config (persistent volume)
+│   ├── .env.example
+│   ├── session.session               (auto) scraper account Telethon session
+│   ├── sessions/                     (auto) Phase 1 sender sessions per account
+│   ├── accounts.json                 (auto) 10-account registry
+│   ├── queue.json                    (auto) pending DMs per account
+│   ├── sent_log.json                 (auto) audit log of every send attempt
+│   └── groups.json                   (auto) tracked groups
+│
+├── frontend/                         Next.js 16 dashboard (React 19 + Tailwind 4)
+│   └── src/
+│       ├── app/
+│       │   ├── (landing)/            Public marketing page
+│       │   ├── (auth)/               Login, signup, callback
+│       │   ├── (dashboard)/          Protected pages
+│       │   │   ├── layout.tsx        Auth guard + nav + health banner
+│       │   │   ├── dashboard/        Overview
+│       │   │   ├── groups/           Phase 0 scraper
+│       │   │   ├── contacts/         Scraped users table
+│       │   │   ├── accounts/         Sender fleet + signup wizard
+│       │   │   ├── templates/        Message templates CRUD (Supabase)
+│       │   │   ├── campaigns/        Launch + queue view
+│       │   │   └── settings/         Profile + sending defaults
+│       │   ├── layout.tsx            Root + theme-boot script + LocaleProvider
+│       │   └── globals.css           Light/dark theme tokens
+│       ├── components/               Shared UI: NavBar, ThemeToggle, LanguageToggle,
+│       │                             AddAccountModal, ProxyCell, Pagination,
+│       │                             WorkerHealthBanner, AccountLabelEditor, ...
+│       ├── lib/
+│       │   ├── api.ts                Typed API client for the Python backend
+│       │   ├── supabase/             Browser/server/admin clients + proxy.ts
+│       │   ├── actions/              Server actions (templates, settings)
+│       │   └── i18n/                 Messages (en/pt/es) + LocaleProvider + useT
+│       ├── types/
+│       │   └── database.ts           TypeScript mirror of the Supabase schema
+│       └── proxy.ts                  Next.js 16 middleware (auth session refresh)
+│
+├── supabase/
+│   └── migrations/
+│       ├── 00001_initial_schema.sql  10 tables + 4 enums + RLS policies + triggers
+│       └── 00002_user_settings.sql   Per-user sending preferences
+│
+├── docs/
+│   ├── DEPLOYMENT.md                 Vercel + Fly.io + Supabase step-by-step
+│   ├── SETUP-SUPABASE.md             Supabase provisioning walkthrough
+│   └── RUN-LOCALLY.md                Local-only dev (no cloud services)
+│
+├── .gitignore
+└── README.md                         This file
+```
 
-1. Click **Scrape Members** or **Scrape Messages** at least once — this tells the monitor which mode to use
-2. Click **Monitor** to start a background job that checks every 5 minutes
-3. New users found are appended to the sheet and marked `NEW` in the last column
-4. Click **Stop** to pause monitoring
+## Configuration
 
-The chosen mode is persisted, so monitoring uses the same method after a backend restart.
+### Backend `.env` (in `backend/.env`, never commit)
 
-### Removing a group
+```env
+# Telegram (scraper + default for new sender accounts)
+TELEGRAM_API_ID=1234567
+TELEGRAM_API_HASH=abcdef0123456789abcdef0123456789
+TELEGRAM_PHONE=+1234567890
 
-Click the trash icon next to a group. This stops monitoring and removes the group from tracking. **Data already in Google Sheets is NOT deleted** — it stays for reference.
+# Google Sheets
+GOOGLE_SHEET_URL=https://docs.google.com/spreadsheets/d/your_sheet_id/edit
+GOOGLE_CREDENTIALS_FILE=credentials.json
 
-## Google Sheet Layout
+# Optional
+MONITOR_INTERVAL=300
+FRONTEND_URL=http://localhost:3000
 
-Each group gets its own worksheet tab. A **Dashboard** summary tab is auto-created as the first tab:
+# Optional (for Supabase-aware backend — Phase 2)
+NEXT_PUBLIC_SUPABASE_URL=https://<ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=...
+```
 
-### Dashboard Tab
+### Frontend `.env.local` (in `frontend/.env.local`, gitignored)
 
-| Group Name | Group URL | Total Members | New Members | Last Scraped | Status |
-|------------|-----------|---------------|-------------|--------------|--------|
-| Richsweeps | https://t.me/Richsweeps | 6664 | 12 | 2026-04-09 14:30 | Monitoring |
-| Crypto Chat | https://t.me/+abc... | 800 | 0 | 2026-04-09 14:25 | Scraped |
+```env
+NEXT_PUBLIC_API_URL=http://localhost:8000
 
-### Per-Group Tabs
+# Leave these blank for local-dev mode; fill in for production
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+```
 
-| User ID | Username | First Name | Last Name | Phone | Group | Scraped At | Is New |
-|---------|----------|------------|-----------|-------|-------|------------|--------|
-| 123456789 | johndoe | John | Doe | | Richsweeps | 2026-04-09T14:30:00 | NEW |
+## How to use
 
-Phone numbers only appear if the user has made them publicly visible.
+### 1. Scrape a group
 
-## API Reference
+1. Open the dashboard at `/groups`.
+2. Paste a Telegram URL (`https://t.me/groupname`, `https://t.me/+hash`, or `@username`) → click **+ Add**.
+3. Click **Scrape Members** (for supergroups) or **Scrape Messages** (for broadcast channels).
+4. Click **Monitor** to auto-detect new members every 5 min.
 
-All endpoints are at `http://localhost:8000`.
+Results land in your Google Sheet: one tab per group, plus a Dashboard summary tab.
 
+### 2. Onboard a sender account
+
+**Option A — Web wizard** (recommended)
+
+1. `/accounts` → **+ Add account**.
+2. Fill phone (E.164 format), optional label, and the proxy details (IPRoyal or mobile proxy).
+3. Click **Send SMS code** → enter the code.
+4. If the account has 2FA cloud password → enter it.
+5. Success → the account appears in the table with status `warming`, worker auto-starts.
+
+**Option B — CLI**
+
+```bash
+cd backend && source venv/bin/activate
+python add_account.py
+```
+
+Answers the same prompts interactively. Useful for headless setups.
+
+### 3. Create message templates
+
+1. `/templates` → **+ New template**.
+2. Name: `Opener EN — casual`.
+3. Body: `Hey {first_name}, saw you in the group — mind a quick chat?`
+4. Create **at least 3 variants** — the sender picks one at random per DM so no two go out byte-identical.
+
+Placeholders:
+- `{first_name}` — from the recipient's Telegram profile
+- `{last_name}`
+- `{username}`
+
+### 4. Launch a campaign
+
+1. `/campaigns`.
+2. **Source sheet**: pick the scraped group.
+3. **Sender accounts**: tick the accounts to use (warming accounts are pickable — DMs will queue until day 8).
+4. **Message templates**: paste 3+ variants separated by a line containing `---`.
+5. Optional: name, limit (caps total DMs), delete-after (seconds).
+6. **Enqueue campaign**.
+
+The sender worker picks up the queue and starts sending at each account's current daily limit with random 45–180s delays between sends.
+
+## Phase 1 safety details (under the hood)
+
+| Safety | Source |
+|---|---|
+| Warm-up ladder: days 1–7 zero, 3 → 50 over days 8–22 | `backend/accounts.py::WARMUP_LADDER` |
+| Random delay between sends: uniform 45–180s | `backend/sender.py::DELAY_RANGE_S` |
+| Unique message per send: 1–3 zero-width chars appended | `backend/sender.py::_invisible_suffix` |
+| Weighted template rotation | `backend/sender.py::_pick_message` |
+| 48h cool-down after `PeerFloodError` | `backend/error_handler.py::PEER_FLOOD_PAUSE_S` |
+| Long `FloodWaitError` pauses account for that exact duration | `backend/error_handler.py::classify` |
+| Terminal-ban detection | `backend/client_pool.py::health_check` |
+| Daily counter resets at UTC midnight | `backend/accounts.py::reset_daily_counter_if_stale` |
+| Per-account SOCKS5 proxy with `rdns=True` (no DNS leak) | `backend/client_pool.py::build_proxy_tuple` |
+
+## API reference
+
+All endpoints at `http://localhost:8000` (or your deployed Fly URL). See inline FastAPI docstrings + OpenAPI at `/docs` on the running server.
+
+**Groups** (Phase 0)
 | Method | Endpoint | Description |
-|--------|----------|-------------|
+|---|---|---|
 | GET | `/api/health` | Health check |
-| POST | `/api/groups` | Add group (body: `{"url": "..."}`) |
-| GET | `/api/groups` | List all tracked groups |
-| DELETE | `/api/groups/{id}` | Remove a group from tracking |
-| POST | `/api/groups/{id}/scrape` | Scrape member list now |
-| POST | `/api/groups/{id}/scrape-messages?message_limit=5000` | Scrape users from messages now |
-| POST | `/api/groups/{id}/monitor/start?interval=300` | Start monitoring (uses last scrape mode) |
-| POST | `/api/groups/{id}/monitor/stop` | Stop monitoring |
-| GET | `/api/groups/{id}/monitor` | Get monitor status for a group |
-| GET | `/api/monitoring` | Get all monitor statuses |
-| GET | `/api/sheets/stats` | Row counts per worksheet |
-| GET | `/api/sheets/{group_name}/members` | Fetch members from a specific sheet |
+| POST | `/api/groups` | Add group |
+| GET | `/api/groups` | List groups |
+| DELETE | `/api/groups/{id}` | Remove group |
+| POST | `/api/groups/{id}/scrape` | Scrape member list |
+| POST | `/api/groups/{id}/scrape-messages` | Scrape from messages |
+| POST | `/api/groups/{id}/monitor/start` | Start background monitor |
+| POST | `/api/groups/{id}/monitor/stop` | Stop monitor |
+| GET | `/api/monitoring` | Status of all monitors |
+| GET | `/api/sheets/stats` | Row counts per group |
+| GET | `/api/sheets/{group_name}/members` | Fetch members of a group |
 
-## Environment Variables
+**Accounts** (Phase 1)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/accounts` | List all accounts |
+| GET | `/api/accounts/{id}` | Single account |
+| PATCH | `/api/accounts/{id}` | Update label |
+| DELETE | `/api/accounts/{id}` | Remove + delete session file |
+| POST | `/api/accounts/{id}/pause` | Pause (stop worker + flag) |
+| POST | `/api/accounts/{id}/resume` | Resume |
+| POST | `/api/accounts/{id}/health-check` | Liveness probe |
+| POST | `/api/accounts/health-check-all` | All accounts |
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TELEGRAM_API_ID` | Yes | From my.telegram.org |
-| `TELEGRAM_API_HASH` | Yes | From my.telegram.org |
-| `TELEGRAM_PHONE` | Yes | Phone number with country code (e.g. `+351...`) |
-| `GOOGLE_SHEET_URL` | Yes | Full URL of the target Google Sheet |
-| `GOOGLE_CREDENTIALS_FILE` | No | Path to OAuth client JSON (default: `credentials.json`) |
-| `MONITOR_INTERVAL` | No | Seconds between monitor checks (default: `300`) |
-| `FRONTEND_URL` | No | Frontend URL for CORS (default: `http://localhost:3000`) |
+**Signup** (Phase 1 web wizard)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/accounts/signup/start` | Step 1: request SMS code |
+| POST | `/api/accounts/signup/verify` | Step 2: submit code |
+| POST | `/api/accounts/signup/password` | Step 3: submit 2FA if needed |
+| DELETE | `/api/accounts/signup/{token}` | Abandon |
 
-## How It Works
+**Sender** (Phase 1)
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/sender/enqueue` | Queue DMs for one account |
+| POST | `/api/sender/distribute` | Round-robin across accounts |
+| GET | `/api/sender/queue` | Snapshot |
+| DELETE | `/api/sender/queue/{id}` | Clear one account's queue |
+| DELETE | `/api/sender/queue` | Clear all |
+| GET | `/api/sender/sent-log` | Tail of send audit log |
+| POST | `/api/sender/workers/{id}/start` | Start worker |
+| POST | `/api/sender/workers/{id}/stop` | Stop worker |
+| POST | `/api/sender/workers/start-all` | Bulk start |
+| POST | `/api/sender/workers/stop-all` | Bulk stop |
+| GET | `/api/sender/workers` | All worker states |
 
-### Telegram login flow
+**Warm-up** (Phase 1)
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/warmup/groups` | List warm-up group URLs |
+| PUT | `/api/warmup/groups` | Replace list |
+| POST | `/api/warmup/run/{id}` | Run warm-up for one account |
+| POST | `/api/warmup/run-all` | Run for all |
 
-When the backend starts, it initializes the Telethon client inside the FastAPI lifespan — **before** accepting any API requests. This prevents race conditions from data-center migrations that can otherwise break the session mid-request. If the saved session is broken (e.g. `AuthKeyUnregisteredError`), it automatically deletes `session.session` and re-runs the login flow.
+**Campaigns**
+| Method | Endpoint | Description |
+|---|---|---|
+| POST | `/api/campaigns/enqueue-from-sheet` | Pull members from Sheet + distribute |
 
-### Persistence
+## Development
 
-Groups and their settings are stored in `backend/groups.json`. Every add, delete, scrape, and monitor start/stop writes to disk immediately. On startup, the file is loaded and any groups that were monitoring before shutdown automatically resume.
+Backend tests: none formal yet; run `python -c "import main"` from `backend/` to smoke-test imports.
 
-### Scraping modes
+Frontend typecheck + build:
+```bash
+cd frontend
+npx tsc --noEmit
+npm run build
+```
 
-- **Member mode** uses Telethon's `iter_participants(aggressive=True)`, which combines multiple search strategies to fetch the maximum number of members Telegram will expose.
-- **Message mode** uses `iter_messages` to scan the message history, extracting unique senders. For broadcast channels with a linked discussion group, it automatically detects the link via `GetFullChannelRequest` and scrapes the discussion group instead.
+## Internationalisation
 
-### Deduplication
-
-Before appending, the sheet is read and existing User IDs are loaded into a set. Only users whose IDs are not already in the sheet are appended. This is why running scrape multiple times is safe — existing rows are never touched.
-
-### Monitoring
-
-Uses `APScheduler` with an asyncio scheduler. Each monitored group gets its own interval job. When the job runs, it calls the same scrape function with `mark_new=True`, so any genuinely new users are tagged in the sheet.
-
-## Important Notes
-
-### Broadcast channels vs supergroups
-
-Telegram treats broadcast channels (one-way, like news) differently from supergroups:
-
-- **Supergroups**: All members (up to ~10,000) are visible via the member list API.
-- **Broadcast channels**: Only admins are exposed to non-admin accounts. To scrape all members, the account must be an admin.
-
-For broadcast channels where you aren't admin, use **"Scrape Messages"** — it collects users who posted, which is usually better for outreach anyway (active users > silent lurkers).
-
-### Rate limits
-
-Telegram enforces strict rate limits. The scraper handles `FloodWaitError` by sleeping and retrying automatically. Best practices:
-
-- Keep `MONITOR_INTERVAL` at **300 seconds or more**
-- Very large groups (10k+) can take several minutes per full scrape
-- Don't run multiple scrapes simultaneously on the same account
-
-### Private groups
-
-Invite links work, but the account must have joined the group first (the scraper will attempt to join using the invite link if possible).
+Add a new locale:
+1. In [frontend/src/lib/i18n/messages.ts](frontend/src/lib/i18n/messages.ts):
+   - Extend the `LOCALES` tuple (e.g. `["en", "pt", "es", "fr"]`).
+   - Add `fr: "Français"` to `LOCALE_NAMES` and an emoji to `LOCALE_FLAGS`.
+   - Add a full `const fr: Dict = { ... }` object with every key from `en`.
+   - Register it in `messages`: `export const messages = { en, pt, es, fr };`
+2. Rebuild — the `LanguageToggle` picks it up automatically.
 
 ## Troubleshooting
 
-**"The key is not registered in the system" or `AuthKeyUnregisteredError`**
-Delete `backend/session.session` and restart the backend. The login flow will run again.
+**"Method Not Allowed" on PATCH after code changes**
+Restart the Python backend. FastAPI registers routes at startup.
 
-**Pydantic / Rust compilation error on Windows**
-Use Python 3.12 instead of 3.13, or run `pip install -r requirements.txt --only-binary :all:`
+**Backend shows offline in dashboard**
+Python backend isn't running or `NEXT_PUBLIC_API_URL` is wrong. Verify with `curl http://localhost:8000/api/health`.
 
-**Google login browser doesn't open**
-Make sure you're running the backend on a machine with a browser. For headless servers, use OAuth redirect flow manually or pre-generate `token.json` on a desktop and copy it over.
+**"The key is not registered" / `AuthKeyUnregisteredError`**
+Delete `backend/session.session` and restart. Re-enter the SMS code.
 
-**"Admin access required" error**
-The group is a broadcast channel and your account isn't an admin. Use **"Scrape Messages"** instead.
+**Google OAuth 403 `org_internal`**
+OAuth consent screen is set to "Internal" but you're using a personal Gmail. Change to "External" in Google Cloud Console + add your Gmail as a test user. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#troubleshooting).
 
-**Frontend shows "Backend Offline"**
-The backend is not running, or it's running on a different port. Verify with `curl http://localhost:8000/api/health`.
+**Signup SMS code never arrives**
+Your API app is likely flagged by Telegram (too many failed signups). Create a fresh `api_id`/`api_hash` at https://my.telegram.org, paste into the wizard's **Advanced** section. See the docs.
 
-## File Reference
+**Cloudflare Tunnel URL changed after restart**
+Quick tunnels get random subdomains. For a stable URL, use a named Cloudflare tunnel tied to a free Cloudflare account.
 
-- **Ignored from git**: `backend/venv/`, `backend/__pycache__/`, `backend/session.session*`, `backend/token.json`, `backend/credentials.json`, `backend/groups.json`, `backend/.env`, `frontend/node_modules/`, `frontend/.next/`
+**All accounts paused / banned simultaneously**
+Usually means a shared issue (proxy provider outage, Telegram datacenter blip, or API app flag). Run `POST /api/accounts/health-check-all` and check `flyctl logs` (if deployed) or the local Python terminal.
+
+## Licence
+
+Private project. All rights reserved.
