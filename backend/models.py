@@ -67,6 +67,12 @@ class AccountAdd(BaseModel):
     api_hash: Optional[str] = None
 
 
+class AccountUpdate(BaseModel):
+    """Patch body for editable account fields (friendly label for now)."""
+
+    label: Optional[str] = None
+
+
 class AccountResponse(BaseModel):
     """Redacted account view returned by the API (no proxy creds, no api_hash)."""
 

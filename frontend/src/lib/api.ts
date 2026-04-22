@@ -94,6 +94,11 @@ export const api = {
   // -------- Phase 1: Accounts --------
   getAccounts: () => request<Account[]>("/api/accounts"),
   getAccount: (id: string) => request<Account>(`/api/accounts/${id}`),
+  updateAccount: (id: string, body: { label?: string }) =>
+    request<Account>(`/api/accounts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
   pauseAccount: (id: string) =>
     request<Account>(`/api/accounts/${id}/pause`, { method: "POST" }),
   resumeAccount: (id: string) =>

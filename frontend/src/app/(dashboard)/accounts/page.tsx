@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import AccountLabelEditor from "@/components/AccountLabelEditor";
 import AddAccountModal from "@/components/AddAccountModal";
 import Pagination from "@/components/Pagination";
 import ProxyCell from "@/components/ProxyCell";
@@ -191,8 +192,12 @@ export default function AccountsPage() {
                       className="border-t border-card-border/60 hover:bg-card-border/20"
                     >
                       <td className="px-4 py-3">
-                        <div className="font-medium">{a.label}</div>
-                        <div className="text-text-muted text-xs">
+                        <AccountLabelEditor
+                          accountId={a.id}
+                          value={a.label}
+                          onSaved={refresh}
+                        />
+                        <div className="text-text-muted text-xs mt-0.5">
                           {a.id} · {a.phone}
                         </div>
                       </td>

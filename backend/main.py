@@ -10,6 +10,7 @@ import signup as signup_mod
 import warmup
 from config import FRONTEND_URL
 from models import (
+    AccountUpdate,
     CampaignFromSheetRequest,
     DistributeRequest,
     EnqueueRequest,
@@ -383,6 +384,32 @@ async def get_account(account_id: str):
     data = accounts_mod.load_accounts()
     if account_id not in data:
         raise HTTPException(status_code=404, detail="Account not found")
+    return accounts_mod.public_view(data[account_id])
+
+
+@app.patch("/api/accounts/{account_id}")
+async def update_account(account_id: str, req: AccountUpdate):
+    """Update editable fields on an account (friendly label for now).
+
+    Only `label` is user-editable — everything else (phone, proxy, api creds,
+    warm-up timeline) is set at signup or derived and should NOT be mutable
+    from the dashboard. Add more patchable fields here if/when needed.
+    """
+    data = accounts_mod.load_accounts()
+    if account_id not in data:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    if req.label is not None:
+        new_label = req.label.strip()
+        if len(new_label) > 80:
+            raise HTTPException(
+                status_code=400,
+                detail="Label too long (max 80 characters)",
+            )
+        # Empty label falls back to the account id so the UI never shows blank.
+        data[account_id]["label"] = new_label or account_id
+
+    accounts_mod.save_accounts(data)
     return accounts_mod.public_view(data[account_id])
 
 
