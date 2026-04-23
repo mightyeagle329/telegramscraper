@@ -68,9 +68,12 @@ class AccountAdd(BaseModel):
 
 
 class AccountUpdate(BaseModel):
-    """Patch body for editable account fields (friendly label for now)."""
+    """Patch body for editable account fields."""
 
     label: Optional[str] = None
+    # Set to True to dismiss the stale `last_error` + `last_error_at` fields
+    # from the UI. Doesn't affect account status.
+    dismiss_error: Optional[bool] = None
 
 
 class AccountResponse(BaseModel):

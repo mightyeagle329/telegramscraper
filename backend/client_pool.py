@@ -37,6 +37,7 @@ from telethon.errors import (
 
 from accounts import (
     STATUS_BANNED,
+    clear_error,
     load_accounts,
     mark_error,
     save_accounts,
@@ -46,6 +47,38 @@ from config import TELEGRAM_API_HASH, TELEGRAM_API_ID
 logger = logging.getLogger(__name__)
 
 SUPPORTED_PROXY_TYPES = {"socks5", "socks4", "http"}
+
+
+class ProxyConnectionError(Exception):
+    """Raised when the proxy cannot reach Telegram.
+
+    The TELEGRAM ACCOUNT IS FINE — only the proxy is failing. Treat this as
+    transient: the caller should not mark the account as paused/banned.
+    Typical causes: expired IPRoyal sticky session, proxy auth regeneration,
+    mobile proxy mid-rotation, short-lived network hiccup.
+
+    Also catches the TypeError raised by python-socks 2.5.1 when the
+    underlying socket error has keyword args that Python's built-in
+    ConnectionError doesn't accept.
+    """
+
+    def __init__(
+        self,
+        account_id: str,
+        host: Optional[str],
+        port: Optional[int],
+        original: BaseException,
+    ):
+        self.account_id = account_id
+        self.host = host
+        self.port = port
+        self.original = original
+        where = f"{host}:{port}" if host and port else "direct"
+        super().__init__(
+            f"[{account_id}] proxy {where} unreachable "
+            f"({type(original).__name__}: {original})"
+        )
+
 
 # Cached clients + per-account locks (lazily populated).
 _clients: dict[str, TelegramClient] = {}
@@ -141,6 +174,7 @@ async def get_account_client(account: dict) -> TelegramClient:
       terminally-dead accounts; caller should flip status to 'banned'.
     """
     aid = account["id"]
+    proxy = account.get("proxy") or {}
     async with _lock_for(aid):
         existing = _clients.get(aid)
         if existing is not None and existing.is_connected():
@@ -150,9 +184,30 @@ async def get_account_client(account: dict) -> TelegramClient:
             except (AuthKeyUnregisteredError, AuthKeyError):
                 logger.warning(f"[{aid}] session key expired; reconnecting")
                 await _disconnect_cached(aid)
+            except (ConnectionError, OSError, TimeoutError, TypeError) as e:
+                # Cached client's connection went stale (proxy died mid-run,
+                # network blip, etc.). Drop it and let the code below build a
+                # fresh one — if the proxy is back, we reconnect cleanly.
+                logger.warning(
+                    f"[{aid}] cached client liveness check failed "
+                    f"({type(e).__name__}); reconnecting"
+                )
+                await _disconnect_cached(aid)
 
         client = build_client(account)
-        await client.connect()
+        try:
+            await client.connect()
+        except (ConnectionError, OSError, TimeoutError, TypeError) as e:
+            # Wrap the low-level error (including the python-socks 2.5.1
+            # TypeError bug) into a named exception so callers can tell
+            # "proxy issue" apart from "account banned".
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+            raise ProxyConnectionError(
+                aid, proxy.get("host"), proxy.get("port"), e
+            ) from e
 
         if not await client.is_user_authorized():
             await client.disconnect()
@@ -213,10 +268,19 @@ async def health_check(account: dict) -> dict:
         if me is None:
             raise RuntimeError("get_me() returned None")
         result["connected"] = True
+        # Account proved it's healthy — any stale error from a past blip
+        # is no longer relevant, clear it.
+        clear_error(account)
     except (PhoneNumberBannedError, UserDeactivatedBanError, UserDeactivatedError) as e:
+        # Terminal — account is dead server-side, flag + stop using it.
         account["status"] = STATUS_BANNED
         mark_error(account, f"{type(e).__name__}: {e}")
         await _disconnect_cached(aid)
+    except ProxyConnectionError as e:
+        # Transient — the account is fine, the proxy is down. Log quietly
+        # (info-level), don't change status, let the next cycle retry.
+        logger.info(str(e))
+        mark_error(account, str(e))
     except Exception as e:
         logger.warning(f"[{aid}] health check failed: {type(e).__name__}: {e}")
         mark_error(account, f"{type(e).__name__}: {e}")

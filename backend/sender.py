@@ -44,7 +44,11 @@ from accounts import (
     mark_send,
     save_accounts,
 )
-from client_pool import disconnect_account, get_account_client
+from client_pool import (
+    ProxyConnectionError,
+    disconnect_account,
+    get_account_client,
+)
 from error_handler import classify
 
 logger = logging.getLogger(__name__)
@@ -334,9 +338,25 @@ async def _send_one(account_id: str, item: dict) -> dict:
     message = _pick_message(item)
     try:
         client = await get_account_client(account)
+    except ProxyConnectionError as e:
+        # Transient proxy blip (expired sticky session, cellular hiccup, etc.).
+        # The Telegram account is fine — requeue this target at the head of
+        # the queue and let the next cycle retry. Don't pause the account.
+        logger.info(f"{e}; keeping target in queue for retry")
+        await _atomic_mark_error(account_id, str(e))
+        await _requeue_item(account_id, item)
+        return {
+            "account_id": account_id,
+            "target_user_id": item["target_user_id"],
+            "target_username": item.get("target_username", ""),
+            "campaign": item.get("campaign", ""),
+            "status": "error",
+            "reason": str(e),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
     except Exception as e:
         await _atomic_mark_error(account_id, f"client_connect: {e}")
-        # Requeue so we don't lose the target; worker will retry after idle loop.
+        # Unknown connect error — requeue + rethrow so the worker logs it.
         await _requeue_item(account_id, item)
         raise
 
@@ -395,57 +415,99 @@ async def _delete_later(client, peer, message_id: int, delay_s: int) -> None:
 
 
 async def _worker_loop(account_id: str) -> None:
+    """Main loop for one account's sender worker.
+
+    Designed to NEVER crash on transient errors. Proxy blips, unknown
+    Telethon edge cases, and per-iteration exceptions are all caught and
+    logged; the loop keeps spinning. Only `asyncio.CancelledError`
+    (explicit stop) or account-gone / account-banned conditions exit.
+    """
     logger.info(f"[{account_id}] sender worker started")
+    consecutive_errors = 0
     try:
         while True:
-            # Honour pause-until if the error handler set one.
-            now = datetime.now(timezone.utc).timestamp()
-            pause_ts = _pause_until.get(account_id, 0)
-            if pause_ts > now:
-                sleep_for = min(pause_ts - now, 300)
+            try:
+                # Honour pause-until if the error handler set one.
+                now = datetime.now(timezone.utc).timestamp()
+                pause_ts = _pause_until.get(account_id, 0)
+                if pause_ts > now:
+                    sleep_for = min(pause_ts - now, 300)
+                    logger.info(
+                        f"[{account_id}] paused for {int(pause_ts - now)}s more; sleeping"
+                    )
+                    await asyncio.sleep(sleep_for)
+                    continue
+
+                account = await _get_account_snapshot(account_id)
+                if account is None:
+                    logger.warning(
+                        f"[{account_id}] account record gone — stopping worker"
+                    )
+                    return
+                if account.get("status") == STATUS_BANNED:
+                    logger.warning(f"[{account_id}] banned — stopping worker")
+                    return
+
+                ok, _reason = can_send(account)
+                if not ok:
+                    # Warming / daily cap / paused — just wait and re-check.
+                    await asyncio.sleep(IDLE_SLEEP_S)
+                    continue
+
+                item = await _pop_next_item(account_id)
+                if item is None:
+                    await asyncio.sleep(IDLE_SLEEP_S)
+                    continue
+
+                entry = await _send_one(account_id, item)
+                await _append_sent_log(entry)
+                consecutive_errors = 0  # success (or orderly skip) — reset
+
+                if entry["status"] == "sent":
+                    delay = random.uniform(*DELAY_RANGE_S)
+                    logger.info(
+                        f"[{account_id}] sent -> {entry['target_user_id']}, "
+                        f"sleeping {delay:.1f}s"
+                    )
+                    await asyncio.sleep(delay)
+                # skipped / paused / error → no extra delay; the loop's
+                # top-of-iteration gates handle rate-limits.
+
+            except asyncio.CancelledError:
+                raise
+
+            except ProxyConnectionError as e:
+                # Already logged + handled in _send_one; just back off a bit
+                # longer than IDLE_SLEEP_S so we don't hammer a dead proxy.
+                consecutive_errors += 1
+                backoff = min(IDLE_SLEEP_S * (1 + consecutive_errors), 300)
                 logger.info(
-                    f"[{account_id}] paused for {int(pause_ts - now)}s more; sleeping"
+                    f"[{account_id}] proxy unreachable "
+                    f"(consecutive={consecutive_errors}); backing off {backoff}s"
                 )
-                await asyncio.sleep(sleep_for)
-                continue
+                await asyncio.sleep(backoff)
 
-            account = await _get_account_snapshot(account_id)
-            if account is None:
-                logger.warning(f"[{account_id}] account record gone — stopping worker")
-                return
-            if account.get("status") == STATUS_BANNED:
-                logger.warning(f"[{account_id}] banned — stopping worker")
-                return
-
-            ok, reason = can_send(account)
-            if not ok:
-                # Could be: still warming, daily limit hit, paused. Sleep and re-check.
-                await asyncio.sleep(IDLE_SLEEP_S)
-                continue
-
-            item = await _pop_next_item(account_id)
-            if item is None:
-                await asyncio.sleep(IDLE_SLEEP_S)
-                continue
-
-            entry = await _send_one(account_id, item)
-            await _append_sent_log(entry)
-
-            if entry["status"] == "sent":
-                delay = random.uniform(*DELAY_RANGE_S)
-                logger.info(
-                    f"[{account_id}] sent -> {entry['target_user_id']}, "
-                    f"sleeping {delay:.1f}s"
+            except Exception as e:
+                # Unknown error during an iteration. Log the full traceback
+                # but KEEP THE WORKER ALIVE — the most common root cause is
+                # a transient network issue and the next iteration will be
+                # fine. If it's a real bug, the logs will show repeats and
+                # we can investigate.
+                consecutive_errors += 1
+                logger.exception(
+                    f"[{account_id}] iteration error "
+                    f"(consecutive={consecutive_errors}): {e}"
                 )
-                await asyncio.sleep(delay)
-            # For skipped/paused items we don't add the normal random delay —
-            # the account may have been paused by the error handler, which will
-            # gate the next iteration at the top of the loop anyway.
+                await asyncio.sleep(IDLE_SLEEP_S)
+
     except asyncio.CancelledError:
         logger.info(f"[{account_id}] sender worker cancelled")
         raise
     except Exception as e:
-        logger.exception(f"[{account_id}] sender worker crashed: {e}")
+        # This catch is a last-resort: we shouldn't reach it because the
+        # inner try/except already handles everything. If we do, log and
+        # exit — the dashboard will show the worker as stopped.
+        logger.exception(f"[{account_id}] sender worker exited unexpectedly: {e}")
 
 
 # ---------- worker lifecycle ----------

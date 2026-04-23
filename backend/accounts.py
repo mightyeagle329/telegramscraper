@@ -177,11 +177,17 @@ def can_send(account: dict[str, Any]) -> tuple[bool, str]:
 
 
 def mark_send(account: dict[str, Any]) -> None:
-    """Record that this account just sent a DM."""
+    """Record that this account just sent a DM.
+
+    A successful send implies whatever was last broken (proxy blip, auth,
+    Telethon reconnect) is now working → stale ``last_error`` is no longer
+    relevant, so clear it.
+    """
     reset_daily_counter_if_stale(account)
     account["daily_sent"] = account.get("daily_sent", 0) + 1
     account["total_sent"] = account.get("total_sent", 0) + 1
     account["last_send_at"] = _now_iso()
+    clear_error(account)
 
 
 def mark_error(account: dict[str, Any], error: str, pause: bool = False) -> None:
@@ -190,6 +196,12 @@ def mark_error(account: dict[str, Any], error: str, pause: bool = False) -> None
     account["last_error_at"] = _now_iso()
     if pause:
         account["status"] = STATUS_PAUSED
+
+
+def clear_error(account: dict[str, Any]) -> None:
+    """Drop the stale ``last_error`` fields after a successful operation."""
+    account["last_error"] = None
+    account["last_error_at"] = None
 
 
 def public_view(account: dict[str, Any]) -> dict[str, Any]:

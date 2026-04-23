@@ -94,7 +94,10 @@ export const api = {
   // -------- Phase 1: Accounts --------
   getAccounts: () => request<Account[]>("/api/accounts"),
   getAccount: (id: string) => request<Account>(`/api/accounts/${id}`),
-  updateAccount: (id: string, body: { label?: string }) =>
+  updateAccount: (
+    id: string,
+    body: { label?: string; dismiss_error?: boolean }
+  ) =>
     request<Account>(`/api/accounts/${id}`, {
       method: "PATCH",
       body: JSON.stringify(body),

@@ -235,8 +235,34 @@ export default function AccountsPage() {
                           password={a.proxy_password ?? null}
                         />
                       </td>
-                      <td className="px-4 py-3 text-xs text-accent-red max-w-[220px] truncate">
-                        {a.last_error ?? "—"}
+                      <td className="px-4 py-3 text-xs max-w-[220px]">
+                        {a.last_error ? (
+                          <div className="flex items-start gap-1">
+                            <span
+                              className="text-accent-red truncate"
+                              title={a.last_error}
+                            >
+                              {a.last_error}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                run(a.id, "dismiss-error", () =>
+                                  api.updateAccount(a.id, {
+                                    dismiss_error: true,
+                                  })
+                                )
+                              }
+                              disabled={!!b}
+                              title="Dismiss this error"
+                              className="text-text-muted hover:text-foreground shrink-0 px-1"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-text-muted">—</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="inline-flex flex-wrap gap-1 justify-end">

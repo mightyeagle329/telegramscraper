@@ -409,6 +409,9 @@ async def update_account(account_id: str, req: AccountUpdate):
         # Empty label falls back to the account id so the UI never shows blank.
         data[account_id]["label"] = new_label or account_id
 
+    if req.dismiss_error:
+        accounts_mod.clear_error(data[account_id])
+
     accounts_mod.save_accounts(data)
     return accounts_mod.public_view(data[account_id])
 

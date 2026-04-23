@@ -20,7 +20,9 @@ frontend/.env*
 # ─── Runtime state (Python backend) ─────────────────────────────────
 backend/*.session
 backend/*.session-journal
-backend/sessions/              # Phase 1 per-account Telethon sessions
+# Phase 1 per-account Telethon sessions (folder + its contents)
+backend/sessions/
+backend/sessions/**
 backend/groups.json
 backend/accounts.json
 backend/queue.json
