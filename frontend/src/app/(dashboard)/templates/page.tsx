@@ -56,9 +56,11 @@ export default async function TemplatesPage() {
       <div>
         <h1 className="text-2xl font-bold">Templates</h1>
         <p className="text-text-muted text-sm">
-          Reusable message variants with <code>{"{first_name}"}</code>-style
-          placeholders. Workers pick one at random per send so no two DMs ship
-          byte-identical.
+          Your reusable message library. Each template is a variant with{" "}
+          <code>{"{first_name}"}</code>-style placeholders. When you launch a
+          campaign on the <a href="/campaigns" className="text-foreground hover:underline">Campaigns page</a>, you can pick saved
+          templates from this library — both for the primary DM and for the
+          follow-up nudge.
         </p>
       </div>
       {error ? (

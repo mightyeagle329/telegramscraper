@@ -3,11 +3,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n/context";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import {
+  createTemplate,
+  listTemplates,
+} from "@/lib/actions/templates";
+import TemplatePicker from "@/components/TemplatePicker";
 import type {
   Account,
   QueueSnapshotEntry,
   SentLogEntry,
 } from "@/lib/types";
+import type { DbMessageTemplate } from "@/types/database";
 
 export default function CampaignsPage() {
   const t = useT();
@@ -16,29 +23,42 @@ export default function CampaignsPage() {
   const [queue, setQueue] = useState<Record<string, QueueSnapshotEntry>>({});
   const [sentLog, setSentLog] = useState<SentLogEntry[]>([]);
 
+  // Saved templates loaded from Supabase. Empty when Supabase isn't
+  // configured OR the user hasn't created any yet.
+  const [library, setLibrary] = useState<DbMessageTemplate[]>([]);
+  const supabaseAvailable = isSupabaseConfigured();
+
   const [selectedSheet, setSelectedSheet] = useState("");
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
-  const [templatesRaw, setTemplatesRaw] = useState(
+
+  // Primary message — split into "library selections" + "inline textarea".
+  // The campaign uses BOTH combined.
+  const [primarySelectedIds, setPrimarySelectedIds] = useState<string[]>([]);
+  const [primaryInline, setPrimaryInline] = useState(
     [
       "Hey {first_name}, saw you in the group — worth a quick chat?",
       "Hi {first_name}! Quick question about the group we're both in.",
       "Hello @{username}, hope today's good — got a sec?",
     ].join("\n---\n")
   );
+
   const [campaignName, setCampaignName] = useState("");
   const [limit, setLimit] = useState<string>("");
   const [deleteAfter, setDeleteAfter] = useState<string>("");
   const [shuffle, setShuffle] = useState(true);
   const [filterBots, setFilterBots] = useState(true);
-  // Phase 2 — follow-up config. Empty `followUpDays` (or 0) disables follow-ups.
+
+  // Phase 2 — follow-up config (also library + inline).
   const [followUpDays, setFollowUpDays] = useState<string>("");
-  const [followUpTemplatesRaw, setFollowUpTemplatesRaw] = useState(
+  const [followupSelectedIds, setFollowupSelectedIds] = useState<string[]>([]);
+  const [followupInline, setFollowupInline] = useState(
     [
       "Hey {first_name}, just bumping this in case you missed it — quick chat?",
       "Hi {first_name}, following up — happy to share more if helpful.",
       "{first_name}, last nudge — let me know if it's worth a chat or skip.",
     ].join("\n---\n")
   );
+
   const [enqueueing, setEnqueueing] = useState(false);
   const [message, setMessage] = useState<
     { kind: "ok" | "err"; text: string } | null
@@ -70,6 +90,42 @@ export default function CampaignsPage() {
     return () => clearInterval(interval);
   }, [refresh]);
 
+  // Load saved-template library. Silent failure in local-dev mode.
+  const loadLibrary = useCallback(async () => {
+    const res = await listTemplates();
+    if (res.ok) setLibrary(res.data);
+  }, []);
+
+  useEffect(() => {
+    loadLibrary();
+  }, [loadLibrary]);
+
+  // Promote inline variants into the library — called from TemplatePicker
+  // when the user clicks "+ Save inline to library".
+  async function saveInlineToLibrary(variants: string[]) {
+    const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+    for (const body of variants) {
+      const preview = body.slice(0, 30).replace(/\s+/g, " ").trim();
+      await createTemplate({
+        name: `Saved ${stamp} — ${preview}`,
+        body,
+      });
+    }
+    await loadLibrary();
+  }
+
+  // Combine library-selected + inline-parsed into the final variant list.
+  function combineTemplates(selectedIds: string[], inline: string): string[] {
+    const fromLibrary = library
+      .filter((t) => selectedIds.includes(t.id))
+      .map((t) => t.body);
+    const fromInline = inline
+      .split(/\n---\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    return [...fromLibrary, ...fromInline];
+  }
+
   // Accounts that are selectable for a campaign. "warming" stays eligible
   // because queued items will just wait until the account hits day 8 of
   // warm-up; "paused" and "banned" are hard-excluded.
@@ -80,18 +136,6 @@ export default function CampaignsPage() {
       ),
     [accounts]
   );
-
-  const parseTemplates = () =>
-    templatesRaw
-      .split(/\n---\n/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-  const parseFollowUpTemplates = () =>
-    followUpTemplatesRaw
-      .split(/\n---\n/)
-      .map((s) => s.trim())
-      .filter(Boolean);
 
   const toggleAccount = (id: string) => {
     setSelectedAccountIds((ids) =>
@@ -104,7 +148,7 @@ export default function CampaignsPage() {
 
   const enqueue = async () => {
     setMessage(null);
-    const templates = parseTemplates();
+    const templates = combineTemplates(primarySelectedIds, primaryInline);
     if (!selectedSheet) {
       setMessage({ kind: "err", text: "Pick a source sheet." });
       return;
@@ -119,7 +163,7 @@ export default function CampaignsPage() {
     if (templates.length === 0) {
       setMessage({
         kind: "err",
-        text: "Add at least one message template (separate variants with '---').",
+        text: "Add at least one message template (pick from library or write inline).",
       });
       return;
     }
@@ -127,7 +171,7 @@ export default function CampaignsPage() {
     try {
       const followUpDaysN = followUpDays ? Number(followUpDays) : null;
       const followUpTemplates = followUpDaysN
-        ? parseFollowUpTemplates()
+        ? combineTemplates(followupSelectedIds, followupInline)
         : [];
       const result = await api.enqueueFromSheet({
         sheet_group_name: selectedSheet,
@@ -352,22 +396,24 @@ export default function CampaignsPage() {
             </div>
 
             <div>
-              <label className="block text-xs uppercase text-text-muted mb-1">
-                Message templates (separate variants with a line containing{" "}
-                <code className="text-xs">---</code>). Placeholders:{" "}
+              <label className="block text-xs uppercase text-text-muted mb-2">
+                Message templates — placeholders:{" "}
                 <code>{"{first_name}"}</code> <code>{"{last_name}"}</code>{" "}
                 <code>{"{username}"}</code>
               </label>
-              <textarea
-                value={templatesRaw}
-                onChange={(e) => setTemplatesRaw(e.target.value)}
-                rows={14}
-                className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm font-mono"
+              <TemplatePicker
+                libraryTemplates={library}
+                supabaseAvailable={supabaseAvailable}
+                selectedLibraryIds={primarySelectedIds}
+                onSelectedLibraryIdsChange={setPrimarySelectedIds}
+                inlineText={primaryInline}
+                onInlineTextChange={setPrimaryInline}
+                onSaveInlineToLibrary={saveInlineToLibrary}
+                rows={10}
+                placeholder={
+                  "Hey {first_name}, saw you in the group...\n---\nHi {first_name}! ..."
+                }
               />
-              <div className="text-xs text-text-muted mt-1">
-                {parseTemplates().length} template variant(s) detected — the
-                sender picks one at random per send.
-              </div>
             </div>
           </div>
 
@@ -397,22 +443,22 @@ export default function CampaignsPage() {
 
             {followUpDays && Number(followUpDays) > 0 ? (
               <div>
-                <label className="block text-xs uppercase text-text-muted mb-1">
-                  Follow-up templates (separate variants with{" "}
-                  <code className="text-xs">---</code>)
+                <label className="block text-xs uppercase text-text-muted mb-2">
+                  Follow-up templates
                 </label>
-                <textarea
-                  value={followUpTemplatesRaw}
-                  onChange={(e) =>
-                    setFollowUpTemplatesRaw(e.target.value)
+                <TemplatePicker
+                  libraryTemplates={library}
+                  supabaseAvailable={supabaseAvailable}
+                  selectedLibraryIds={followupSelectedIds}
+                  onSelectedLibraryIdsChange={setFollowupSelectedIds}
+                  inlineText={followupInline}
+                  onInlineTextChange={setFollowupInline}
+                  onSaveInlineToLibrary={saveInlineToLibrary}
+                  rows={5}
+                  placeholder={
+                    "Hey {first_name}, just bumping this in case you missed it..."
                   }
-                  rows={6}
-                  className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm font-mono"
                 />
-                <div className="text-xs text-text-muted mt-1">
-                  {parseFollowUpTemplates().length} follow-up variant(s)
-                  detected.
-                </div>
               </div>
             ) : null}
           </div>
