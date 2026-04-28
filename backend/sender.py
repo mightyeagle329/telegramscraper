@@ -367,8 +367,20 @@ async def _send_one(account_id: str, item: dict) -> dict:
         await _requeue_item(account_id, item)
         raise
 
-    try:
+    # Resolve peer. Telegram needs the recipient's `access_hash` to route a
+    # DM to a stranger; the user_id alone returns PeerIdInvalidError. The
+    # @username path bypasses this — Telethon resolves the username server-
+    # side. For users without a public username we fall back to the cache
+    # (only works if this client has seen the user before, which sender
+    # accounts haven't), and the API call will skip cleanly if it can't.
+    username = (item.get("target_username") or "").strip()
+    if username:
+        target = username if username.startswith("@") else f"@{username}"
+        peer = target  # type: ignore[assignment]
+    else:
         peer = InputPeerUser(item["target_user_id"], 0)
+
+    try:
         sent = await client.send_message(peer, message)
     except BaseException as e:
         outcome = classify(e)

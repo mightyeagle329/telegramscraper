@@ -22,6 +22,7 @@ from telethon.errors import (
     FloodWaitError,
     InputUserDeactivatedError,
     PeerFloodError,
+    PeerIdInvalidError,
     PhoneNumberBannedError,
     UserDeactivatedBanError,
     UserDeactivatedError,
@@ -101,6 +102,15 @@ def classify(exc: BaseException) -> SendOutcome:
         return SendOutcome(
             skip_target=True,
             reason="ChatWriteForbidden — sender can't write to this peer",
+        )
+    if isinstance(exc, PeerIdInvalidError):
+        # Recipient has no public @username and the sender account hasn't
+        # cached the user's access_hash. Without one of those, Telegram
+        # refuses to route the DM. Not the account's fault — just an
+        # unreachable target for cold outreach.
+        return SendOutcome(
+            skip_target=True,
+            reason="PeerIdInvalid — recipient has no @username; cold DM not possible",
         )
 
     # Unknown: skip the target and record the error, don't pause the account blindly.
