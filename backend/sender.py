@@ -384,12 +384,18 @@ async def _send_one(account_id: str, item: dict) -> dict:
         sent = await client.send_message(peer, message)
     except BaseException as e:
         outcome = classify(e)
-        await _atomic_mark_error(
-            account_id,
-            outcome.reason,
-            ban=outcome.ban_account,
-            pause_s=outcome.pause_account_s,
-        )
+        # Only write to the account's last_error when the ACCOUNT itself is
+        # affected (paused / banned). Target-specific skips (privacy
+        # restricted, peer-id invalid, blocked, deactivated, etc.) belong
+        # in sent_log.json — not on the per-account row, where they make
+        # a healthy account look broken.
+        if outcome.ban_account or outcome.pause_account_s:
+            await _atomic_mark_error(
+                account_id,
+                outcome.reason,
+                ban=outcome.ban_account,
+                pause_s=outcome.pause_account_s,
+            )
         if outcome.retry_same_target_s:
             logger.info(
                 f"[{account_id}] short FloodWait — sleeping "
