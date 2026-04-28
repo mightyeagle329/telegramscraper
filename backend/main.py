@@ -1,11 +1,13 @@
 import logging
 import random
 from contextlib import asynccontextmanager
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import accounts as accounts_mod
 import client_pool
+import reply_watcher
 import sender
 import signup as signup_mod
 import target_filter
@@ -117,6 +119,15 @@ async def lifespan(app: FastAPI):
             logger.info(f"Phase 1: started sender workers for {started}")
     except Exception as e:
         logger.error(f"Could not start sender workers: {e}")
+
+    # Phase 2: register live reply-detection handlers on every account.
+    try:
+        results = await reply_watcher.install_for_all_accounts()
+        installed = [aid for aid, ok in results.items() if ok]
+        if installed:
+            logger.info(f"Phase 2: reply handlers installed for {installed}")
+    except Exception as e:
+        logger.error(f"Could not install reply handlers: {e}")
 
     # Phase 1: register scheduled jobs (health check every 30 min, warmup daily).
     try:
@@ -504,6 +515,8 @@ async def sender_enqueue(req: EnqueueRequest):
         templates=req.templates,
         delete_after_s=req.delete_after_s,
         campaign=req.campaign,
+        follow_up_after_days=req.follow_up_after_days,
+        follow_up_templates=req.follow_up_templates,
     )
     return {"account_id": req.account_id, "enqueued": added}
 
@@ -520,8 +533,20 @@ async def sender_distribute(req: DistributeRequest):
         templates=req.templates,
         delete_after_s=req.delete_after_s,
         campaign=req.campaign,
+        follow_up_after_days=req.follow_up_after_days,
+        follow_up_templates=req.follow_up_templates,
     )
     return {"enqueued": counts}
+
+
+@app.get("/api/replies")
+async def list_replies(limit: int = 50, account_id: Optional[str] = None):
+    """Recent replies received on any sender account.
+
+    The reply_watcher records every incoming message from a previously-DM'd
+    user into ``replies.json``. This endpoint returns the tail of that file.
+    """
+    return reply_watcher.list_recent_replies(limit=limit, account_id=account_id)
 
 
 @app.get("/api/sender/queue")
@@ -694,6 +719,8 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         templates=req.templates,
         delete_after_s=req.delete_after_s,
         campaign=req.campaign or req.sheet_group_name,
+        follow_up_after_days=req.follow_up_after_days,
+        follow_up_templates=req.follow_up_templates,
     )
     return {
         "enqueued": counts,

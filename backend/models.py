@@ -113,6 +113,8 @@ class EnqueueRequest(BaseModel):
     templates: list[str]
     delete_after_s: Optional[int] = None
     campaign: str = ""
+    follow_up_after_days: Optional[int] = None
+    follow_up_templates: Optional[list[str]] = None
 
 
 class DistributeRequest(BaseModel):
@@ -123,6 +125,8 @@ class DistributeRequest(BaseModel):
     templates: list[str]
     delete_after_s: Optional[int] = None
     campaign: str = ""
+    follow_up_after_days: Optional[int] = None
+    follow_up_templates: Optional[list[str]] = None
 
 
 class CampaignFromSheetRequest(BaseModel):
@@ -146,6 +150,11 @@ class CampaignFromSheetRequest(BaseModel):
     # to True — these accounts almost always have privacy restrictions
     # and skip 100% of the time. Set False to bypass and try them anyway.
     filter_bots: bool = True
+    # Phase 2 follow-up: if a recipient hasn't replied N days after the
+    # primary DM, send them this template set as a nudge. Leave at None /
+    # empty list to disable (no follow-up scheduled).
+    follow_up_after_days: Optional[int] = None
+    follow_up_templates: Optional[list[str]] = None
 
 
 class WarmupGroupsRequest(BaseModel):

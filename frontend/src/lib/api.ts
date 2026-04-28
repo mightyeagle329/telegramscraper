@@ -2,6 +2,7 @@ import type {
   Account,
   ProxyInput,
   QueueSnapshotEntry,
+  ReplyEntry,
   SentLogEntry,
   SignupStartResponse,
   SignupStepResponse,
@@ -177,6 +178,14 @@ export const api = {
     request<any>(`/api/warmup/run-all`, { method: "POST" }),
 
   // -------- Phase 1: Campaigns --------
+  getReplies: (params?: { limit?: number; account_id?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.account_id) q.set("account_id", params.account_id);
+    const qs = q.toString();
+    return request<ReplyEntry[]>(`/api/replies${qs ? `?${qs}` : ""}`);
+  },
+
   enqueueFromSheet: (body: {
     sheet_group_name: string;
     account_ids: string[];
@@ -186,6 +195,8 @@ export const api = {
     limit?: number | null;
     shuffle?: boolean;
     filter_bots?: boolean;
+    follow_up_after_days?: number | null;
+    follow_up_templates?: string[];
   }) =>
     request<{
       enqueued: Record<string, number>;

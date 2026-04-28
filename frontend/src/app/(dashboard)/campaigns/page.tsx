@@ -30,6 +30,15 @@ export default function CampaignsPage() {
   const [deleteAfter, setDeleteAfter] = useState<string>("");
   const [shuffle, setShuffle] = useState(true);
   const [filterBots, setFilterBots] = useState(true);
+  // Phase 2 — follow-up config. Empty `followUpDays` (or 0) disables follow-ups.
+  const [followUpDays, setFollowUpDays] = useState<string>("");
+  const [followUpTemplatesRaw, setFollowUpTemplatesRaw] = useState(
+    [
+      "Hey {first_name}, just bumping this in case you missed it — quick chat?",
+      "Hi {first_name}, following up — happy to share more if helpful.",
+      "{first_name}, last nudge — let me know if it's worth a chat or skip.",
+    ].join("\n---\n")
+  );
   const [enqueueing, setEnqueueing] = useState(false);
   const [message, setMessage] = useState<
     { kind: "ok" | "err"; text: string } | null
@@ -78,6 +87,12 @@ export default function CampaignsPage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
+  const parseFollowUpTemplates = () =>
+    followUpTemplatesRaw
+      .split(/\n---\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
   const toggleAccount = (id: string) => {
     setSelectedAccountIds((ids) =>
       ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]
@@ -110,6 +125,10 @@ export default function CampaignsPage() {
     }
     setEnqueueing(true);
     try {
+      const followUpDaysN = followUpDays ? Number(followUpDays) : null;
+      const followUpTemplates = followUpDaysN
+        ? parseFollowUpTemplates()
+        : [];
       const result = await api.enqueueFromSheet({
         sheet_group_name: selectedSheet,
         account_ids: selectedAccountIds,
@@ -119,6 +138,8 @@ export default function CampaignsPage() {
         limit: limit ? Number(limit) : null,
         shuffle,
         filter_bots: filterBots,
+        follow_up_after_days: followUpDaysN,
+        follow_up_templates: followUpTemplates,
       });
       const totalEnqueued = Object.values(result.enqueued).reduce(
         (s, n) => s + n,
@@ -348,6 +369,52 @@ export default function CampaignsPage() {
                 sender picks one at random per send.
               </div>
             </div>
+          </div>
+
+          {/* Phase 2 — follow-up config */}
+          <div className="mt-6 pt-5 border-t border-card-border/60 space-y-3">
+            <div className="flex flex-col md:flex-row md:items-end md:gap-4">
+              <div className="md:w-48">
+                <label className="block text-xs uppercase text-text-muted mb-1">
+                  Follow-up after (days)
+                  <span className="normal-case text-text-muted/70 ml-2">
+                    blank = off
+                  </span>
+                </label>
+                <input
+                  value={followUpDays}
+                  onChange={(e) => setFollowUpDays(e.target.value)}
+                  inputMode="numeric"
+                  placeholder="off"
+                  className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm"
+                />
+              </div>
+              <p className="text-xs text-text-muted mt-2 md:mt-0 md:flex-1">
+                If a recipient hasn&apos;t replied N days after the primary
+                DM, send them a nudge. Auto-cancelled when they reply.
+              </p>
+            </div>
+
+            {followUpDays && Number(followUpDays) > 0 ? (
+              <div>
+                <label className="block text-xs uppercase text-text-muted mb-1">
+                  Follow-up templates (separate variants with{" "}
+                  <code className="text-xs">---</code>)
+                </label>
+                <textarea
+                  value={followUpTemplatesRaw}
+                  onChange={(e) =>
+                    setFollowUpTemplatesRaw(e.target.value)
+                  }
+                  rows={6}
+                  className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm font-mono"
+                />
+                <div className="text-xs text-text-muted mt-1">
+                  {parseFollowUpTemplates().length} follow-up variant(s)
+                  detected.
+                </div>
+              </div>
+            ) : null}
           </div>
 
           <div className="flex items-center justify-end mt-4">

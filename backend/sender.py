@@ -29,7 +29,7 @@ import logging
 import os
 import random
 import string
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from telethon.tl.types import InputPeerUser
@@ -141,16 +141,19 @@ async def enqueue(
     templates: list[str],
     delete_after_s: Optional[int] = None,
     campaign: str = "",
+    follow_up_after_days: Optional[int] = None,
+    follow_up_templates: Optional[list[str]] = None,
 ) -> int:
     """Add DM tasks to an account's queue.
 
-    ``targets`` is a list of scraped-member dicts (must include ``user_id``;
-    ``username``/``first_name``/``last_name`` used for template rendering).
+    Each target produces a single ``primary`` queue item, scheduled to send
+    immediately (``scheduled_at`` = now). When the primary is sent, the
+    sender auto-enqueues a ``followup`` item scheduled for ``now +
+    follow_up_after_days`` if `follow_up_after_days` was set on the
+    primary's campaign config. The follow-up is cancelled if the recipient
+    replies in the meantime (handled by reply_watcher).
 
-    ``templates`` is a list of message-body variants; the worker picks one
-    at random per send so no two consecutive sends share identical text.
-
-    Returns the number of items successfully enqueued.
+    Returns the number of primary items enqueued.
     """
     if not templates:
         raise ValueError("At least one message template is required")
@@ -167,6 +170,13 @@ async def enqueue(
             "templates": templates,
             "delete_after_s": delete_after_s,
             "campaign": campaign,
+            "kind": "primary",
+            # Items become eligible to send when scheduled_at <= now (UTC).
+            "scheduled_at": now,
+            # Carry the follow-up config on the primary item so the worker
+            # knows whether/when to schedule a follow-up after a successful send.
+            "follow_up_after_days": follow_up_after_days,
+            "follow_up_templates": follow_up_templates or [],
             "enqueued_at": now,
             "attempts": 0,
         }
@@ -187,6 +197,8 @@ async def distribute_round_robin(
     templates: list[str],
     delete_after_s: Optional[int] = None,
     campaign: str = "",
+    follow_up_after_days: Optional[int] = None,
+    follow_up_templates: Optional[list[str]] = None,
 ) -> dict[str, int]:
     """Split targets across a list of accounts round-robin. Returns count per account."""
     if not account_ids:
@@ -196,7 +208,15 @@ async def distribute_round_robin(
         buckets[account_ids[i % len(account_ids)]].append(t)
     counts: dict[str, int] = {}
     for aid, subset in buckets.items():
-        counts[aid] = await enqueue(aid, subset, templates, delete_after_s, campaign)
+        counts[aid] = await enqueue(
+            aid,
+            subset,
+            templates,
+            delete_after_s,
+            campaign,
+            follow_up_after_days=follow_up_after_days,
+            follow_up_templates=follow_up_templates,
+        )
     return counts
 
 
@@ -312,15 +332,28 @@ async def _get_account_snapshot(account_id: str) -> Optional[dict]:
 
 
 async def _pop_next_item(account_id: str) -> Optional[dict]:
+    """Return the next item whose ``scheduled_at`` is in the past.
+
+    Items with ``scheduled_at`` in the future (e.g. follow-ups waiting their
+    delay) stay in the queue. We scan from the front and pop the first
+    eligible one — preserves FIFO ordering among ready items.
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
     async with _queue_lock:
         q = _load_queue()
         items = q.get(account_id, [])
         if not items:
             return None
-        item = items.pop(0)
-        q[account_id] = items
-        _save_queue(q)
-        return item
+        for idx, it in enumerate(items):
+            sched = it.get("scheduled_at") or it.get("enqueued_at") or now_iso
+            if sched <= now_iso:
+                # Eligible — pop it.
+                popped = items.pop(idx)
+                q[account_id] = items
+                _save_queue(q)
+                return popped
+        # Nothing ready yet (everything is a future-scheduled follow-up).
+        return None
 
 
 async def _requeue_item(account_id: str, item: dict) -> None:
@@ -328,6 +361,48 @@ async def _requeue_item(account_id: str, item: dict) -> None:
         q = _load_queue()
         q.setdefault(account_id, []).insert(0, item)
         _save_queue(q)
+
+
+async def _enqueue_followup(account_id: str, primary_item: dict) -> None:
+    """Schedule a follow-up DM for the same target N days from now.
+
+    Called from ``_send_one`` after a primary send succeeds AND the
+    primary's campaign config asked for a follow-up. The follow-up uses
+    the campaign's ``follow_up_templates`` (a separate template set so
+    the user can write different copy), and shares the same target name
+    fields for placeholder rendering.
+    """
+    days = primary_item.get("follow_up_after_days")
+    templates = primary_item.get("follow_up_templates") or []
+    if not days or days <= 0 or not templates:
+        return
+    fire_at = (
+        datetime.now(timezone.utc) + timedelta(days=int(days))
+    ).isoformat()
+    item = {
+        "target_user_id": primary_item["target_user_id"],
+        "target_username": primary_item.get("target_username", ""),
+        "target_first_name": primary_item.get("target_first_name", ""),
+        "target_last_name": primary_item.get("target_last_name", ""),
+        "templates": templates,
+        "delete_after_s": primary_item.get("delete_after_s"),
+        "campaign": primary_item.get("campaign", ""),
+        "kind": "followup",
+        "scheduled_at": fire_at,
+        # Follow-ups don't trigger another follow-up.
+        "follow_up_after_days": None,
+        "follow_up_templates": [],
+        "enqueued_at": datetime.now(timezone.utc).isoformat(),
+        "attempts": 0,
+    }
+    async with _queue_lock:
+        q = _load_queue()
+        q.setdefault(account_id, []).append(item)
+        _save_queue(q)
+    logger.info(
+        f"[{account_id}] scheduled follow-up to "
+        f"{item['target_user_id']} for {fire_at}"
+    )
 
 
 async def _send_one(account_id: str, item: dict) -> dict:
@@ -341,6 +416,27 @@ async def _send_one(account_id: str, item: dict) -> dict:
             "reason": "account record vanished",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+    # Defence in depth: if this is a follow-up but the recipient already
+    # replied (e.g. while the backend was offline and the live handler
+    # missed it), don't nudge them. Skip cleanly.
+    if item.get("kind") == "followup":
+        try:
+            from reply_watcher import reply_count_for
+
+            if reply_count_for(account_id, int(item["target_user_id"])) > 0:
+                return {
+                    "account_id": account_id,
+                    "target_user_id": item["target_user_id"],
+                    "target_username": item.get("target_username", ""),
+                    "campaign": item.get("campaign", ""),
+                    "kind": "followup",
+                    "status": "skipped",
+                    "reason": "recipient already replied — follow-up cancelled",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+        except Exception:
+            pass  # don't block the send on a check failure
 
     message = _pick_message(item)
     try:
@@ -420,11 +516,18 @@ async def _send_one(account_id: str, item: dict) -> dict:
     if delete_after and delete_after > 0:
         asyncio.create_task(_delete_later(client, peer, sent.id, delete_after))
 
+    # Schedule a follow-up for this target if the campaign config asked for one.
+    # Only primary items spawn follow-ups (the followup item itself has
+    # follow_up_after_days=None / templates=[], so this is a no-op there).
+    if item.get("kind", "primary") == "primary":
+        await _enqueue_followup(account_id, item)
+
     return {
         "account_id": account_id,
         "target_user_id": item["target_user_id"],
         "target_username": item["target_username"],
         "campaign": item.get("campaign", ""),
+        "kind": item.get("kind", "primary"),
         "message_id": sent.id,
         "status": "sent",
         "timestamp": datetime.now(timezone.utc).isoformat(),

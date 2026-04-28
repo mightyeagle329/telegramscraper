@@ -4,26 +4,29 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n/context";
-import type { Account, SentLogEntry } from "@/lib/types";
+import type { Account, ReplyEntry, SentLogEntry } from "@/lib/types";
 
 export default function DashboardHome() {
   const t = useT();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [recent, setRecent] = useState<SentLogEntry[]>([]);
+  const [replies, setReplies] = useState<ReplyEntry[]>([]);
   const [queue, setQueue] = useState<Record<string, { pending: number }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const [a, r, q] = await Promise.all([
+      const [a, r, q, rep] = await Promise.all([
         api.getAccounts().catch(() => [] as Account[]),
         api.getSentLog({ limit: 10 }).catch(() => [] as SentLogEntry[]),
         api.getQueue().catch(() => ({})),
+        api.getReplies({ limit: 10 }).catch(() => [] as ReplyEntry[]),
       ]);
       setAccounts(a);
       setRecent(r);
       setQueue(q);
+      setReplies(rep);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -157,6 +160,53 @@ export default function DashboardHome() {
             </ul>
           )}
         </div>
+      </section>
+
+      <section className="card-elevated p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Replies</h2>
+          <span className="text-xs text-text-muted">
+            {replies.length === 0
+              ? "Live — replies will appear here automatically"
+              : `${replies.length} most recent`}
+          </span>
+        </div>
+        {replies.length === 0 ? (
+          <p className="text-text-muted text-sm">
+            No replies yet. The system listens on each sender account; when
+            someone replies to one of our DMs, it shows here and any pending
+            follow-up to that contact is auto-cancelled.
+          </p>
+        ) : (
+          <ul className="space-y-2 text-sm">
+            {replies
+              .slice()
+              .reverse()
+              .map((r, i) => (
+                <li
+                  key={`${r.account_id}-${r.message_id}-${i}`}
+                  className="border-b border-card-border/40 pb-2 last:border-b-0"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs text-text-muted">
+                    <span>
+                      <span className="text-foreground font-medium">
+                        {r.sender_username
+                          ? `@${r.sender_username}`
+                          : r.sender_first_name || r.sender_user_id}
+                      </span>{" "}
+                      → {r.account_id}
+                    </span>
+                    <span>
+                      {new Date(r.received_at).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div className="text-sm mt-1 break-words">
+                    {r.text || <em className="text-text-muted">(no text)</em>}
+                  </div>
+                </li>
+              ))}
+          </ul>
+        )}
       </section>
 
       <section className="card-elevated p-5">

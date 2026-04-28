@@ -82,9 +82,20 @@ export interface SentLogEntry {
   target_username?: string;
   campaign?: string;
   message_id?: number;
+  kind?: "primary" | "followup";
   status: "sent" | "skipped" | "paused" | "error";
   reason?: string;
   timestamp: string;
+}
+
+export interface ReplyEntry {
+  account_id: string;
+  sender_user_id: number;
+  sender_username?: string | null;
+  sender_first_name?: string | null;
+  message_id: number;
+  text: string;
+  received_at: string;
 }
 
 export interface WorkerStatus {
