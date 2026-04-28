@@ -59,6 +59,13 @@ SENT_LOG_FILE = "sent_log.json"
 # Random delay between sends — jittered so two workers don't sync up.
 DELAY_RANGE_S = (45, 180)
 
+# Smaller random delay after a SKIPPED send (recipient privacy-restricted,
+# blocked us, deactivated, etc.). Skips don't penalise the account, but a
+# burst of failed connect-attempts in a few seconds still looks more bot-
+# like than human. 10-30s slows that burst without costing throughput
+# (skipped sends don't count against the daily quota).
+SKIP_DELAY_RANGE_S = (10, 30)
+
 # Cap on how often a single worker loop spins when idle (no items + no eligibility).
 IDLE_SLEEP_S = 30
 
@@ -470,8 +477,19 @@ async def _worker_loop(account_id: str) -> None:
                         f"sleeping {delay:.1f}s"
                     )
                     await asyncio.sleep(delay)
-                # skipped / paused / error → no extra delay; the loop's
-                # top-of-iteration gates handle rate-limits.
+                elif entry["status"] == "skipped":
+                    # Smaller delay after privacy-restricted / blocked /
+                    # deactivated targets, so the worker doesn't burst
+                    # through a queue of unreachable users in a few seconds.
+                    delay = random.uniform(*SKIP_DELAY_RANGE_S)
+                    logger.info(
+                        f"[{account_id}] skipped -> {entry['target_user_id']}, "
+                        f"sleeping {delay:.1f}s"
+                    )
+                    await asyncio.sleep(delay)
+                # paused / error → no extra delay here; the loop's
+                # top-of-iteration gates handle rate-limits + the error
+                # handler may have already set _pause_until.
 
             except asyncio.CancelledError:
                 raise

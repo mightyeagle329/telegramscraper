@@ -16,7 +16,16 @@ from telethon.errors import (
     AuthKeyError,
 )
 
-from config import TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_PHONE
+from config import (
+    SCRAPER_PROXY_HOST,
+    SCRAPER_PROXY_PASSWORD,
+    SCRAPER_PROXY_PORT,
+    SCRAPER_PROXY_TYPE,
+    SCRAPER_PROXY_USERNAME,
+    TELEGRAM_API_ID,
+    TELEGRAM_API_HASH,
+    TELEGRAM_PHONE,
+)
 from sheets import sheets_manager
 
 logger = logging.getLogger(__name__)
@@ -24,6 +33,38 @@ logger = logging.getLogger(__name__)
 SESSION_NAME = "session"
 client: Optional[TelegramClient] = None
 _client_lock = asyncio.Lock()
+
+
+def _scraper_proxy_tuple():
+    """Build the Telethon proxy tuple from SCRAPER_PROXY_* env vars.
+
+    Returns None if no proxy is configured (scraper falls back to direct
+    connection — works but loses the geo-match benefit and may trigger
+    Telegram's anti-share-code protection on re-auth).
+    """
+    if not (SCRAPER_PROXY_HOST and SCRAPER_PROXY_PORT):
+        return None
+    ptype = (SCRAPER_PROXY_TYPE or "socks5").lower()
+    return (
+        ptype,
+        SCRAPER_PROXY_HOST,
+        SCRAPER_PROXY_PORT,
+        True,  # rdns through the proxy — no DNS leaks
+        SCRAPER_PROXY_USERNAME or None,
+        SCRAPER_PROXY_PASSWORD or None,
+    )
+
+
+def _new_telethon_client() -> TelegramClient:
+    """Build a fresh TelegramClient for the scraper, with proxy if configured."""
+    proxy = _scraper_proxy_tuple()
+    if proxy:
+        logger.info(
+            f"Scraper routing through proxy {proxy[0]}://{proxy[1]}:{proxy[2]}"
+        )
+    return TelegramClient(
+        SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH, proxy=proxy
+    )
 
 
 async def init_client() -> TelegramClient:
@@ -45,7 +86,7 @@ async def init_client() -> TelegramClient:
                 logger.warning("Session invalid, will recreate")
                 await _force_disconnect()
 
-        client = TelegramClient(SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+        client = _new_telethon_client()
         try:
             await client.start(phone=TELEGRAM_PHONE)
             me = await client.get_me()
@@ -55,7 +96,7 @@ async def init_client() -> TelegramClient:
             await _force_disconnect()
             _delete_session_files()
 
-            client = TelegramClient(SESSION_NAME, TELEGRAM_API_ID, TELEGRAM_API_HASH)
+            client = _new_telethon_client()
             await client.start(phone=TELEGRAM_PHONE)
             me = await client.get_me()
             logger.info(f"Telegram client logged in as: {me.first_name}")

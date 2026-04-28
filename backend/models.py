@@ -134,6 +134,18 @@ class CampaignFromSheetRequest(BaseModel):
     delete_after_s: Optional[int] = None
     campaign: str = ""
     limit: Optional[int] = None
+    # Shuffle the rows from the sheet before applying `limit`. Defaults to
+    # True because scraped-message order surfaces heavy posters (often
+    # admins / bots / official accounts) at the top — without shuffling,
+    # a small `limit` campaign hits exactly those people, who all have
+    # privacy restrictions and skip 100% of the time. Set False if you
+    # specifically want sheet-order (e.g. recently-scraped first).
+    shuffle: bool = True
+    # Drop usernames / names matching bot / admin / official / support /
+    # staff / news / notify / alerts patterns before enqueueing. Defaults
+    # to True — these accounts almost always have privacy restrictions
+    # and skip 100% of the time. Set False to bypass and try them anyway.
+    filter_bots: bool = True
 
 
 class WarmupGroupsRequest(BaseModel):

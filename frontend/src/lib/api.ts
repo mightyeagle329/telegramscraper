@@ -184,10 +184,13 @@ export const api = {
     delete_after_s?: number | null;
     campaign?: string;
     limit?: number | null;
+    shuffle?: boolean;
+    filter_bots?: boolean;
   }) =>
     request<{
       enqueued: Record<string, number>;
       targets_found: number;
+      filtered_out: number;
     }>(`/api/campaigns/enqueue-from-sheet`, {
       method: "POST",
       body: JSON.stringify(body),

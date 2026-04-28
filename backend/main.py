@@ -1,4 +1,5 @@
 import logging
+import random
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ import accounts as accounts_mod
 import client_pool
 import sender
 import signup as signup_mod
+import target_filter
 import warmup
 from config import FRONTEND_URL
 from models import (
@@ -604,9 +606,28 @@ async def warmup_run_all():
 # =========================================================================
 
 
-def _sheet_rows_to_targets(rows: list[dict], limit: int | None) -> list[dict]:
-    """Normalize gspread get_all_records() rows into sender's target shape."""
-    targets = []
+def _sheet_rows_to_targets(
+    rows: list[dict],
+    limit: int | None,
+    shuffle: bool = True,
+    filter_bots: bool = True,
+) -> tuple[list[dict], int]:
+    """Normalize gspread rows into sender targets.
+
+    Returns ``(targets, filtered_count)``.
+
+    Pipeline:
+      1. Parse rows → target dicts (drops anything without a numeric user_id).
+      2. Optionally drop likely-non-users (bots, admins, official accounts,
+         etc.) via ``target_filter.is_likely_non_user``.
+      3. Optionally shuffle (default on) so a small `limit` doesn't always
+         hit the top-of-sheet contacts (heavy posters / admins).
+      4. Apply the limit.
+
+    Filter is applied BEFORE shuffle/limit so the limit counts only against
+    real users, not against the noise.
+    """
+    targets: list[dict] = []
     for r in rows:
         uid = r.get("User ID") or r.get("user_id")
         if not uid:
@@ -623,9 +644,25 @@ def _sheet_rows_to_targets(rows: list[dict], limit: int | None) -> list[dict]:
                 "last_name": r.get("Last Name") or r.get("last_name") or "",
             }
         )
-        if limit and len(targets) >= limit:
-            break
-    return targets
+
+    filtered_count = 0
+    if filter_bots:
+        kept: list[dict] = []
+        for t in targets:
+            skip, _reason = target_filter.is_likely_non_user(t)
+            if skip:
+                filtered_count += 1
+            else:
+                kept.append(t)
+        targets = kept
+
+    if shuffle:
+        random.shuffle(targets)
+
+    if limit:
+        targets = targets[:limit]
+
+    return targets, filtered_count
 
 
 @app.post("/api/campaigns/enqueue-from-sheet")
@@ -639,9 +676,18 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         rows = sheets_manager.get_all_members(req.sheet_group_name)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sheet read failed: {e}")
-    targets = _sheet_rows_to_targets(rows, req.limit)
+    targets, filtered_out = _sheet_rows_to_targets(
+        rows,
+        req.limit,
+        shuffle=req.shuffle,
+        filter_bots=req.filter_bots,
+    )
     if not targets:
-        return {"enqueued": {aid: 0 for aid in req.account_ids}, "targets_found": 0}
+        return {
+            "enqueued": {aid: 0 for aid in req.account_ids},
+            "targets_found": 0,
+            "filtered_out": filtered_out,
+        }
     counts = await sender.distribute_round_robin(
         targets=targets,
         account_ids=req.account_ids,
@@ -649,7 +695,11 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         delete_after_s=req.delete_after_s,
         campaign=req.campaign or req.sheet_group_name,
     )
-    return {"enqueued": counts, "targets_found": len(targets)}
+    return {
+        "enqueued": counts,
+        "targets_found": len(targets),
+        "filtered_out": filtered_out,
+    }
 
 
 if __name__ == "__main__":

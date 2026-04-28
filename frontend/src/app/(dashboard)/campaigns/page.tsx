@@ -28,6 +28,8 @@ export default function CampaignsPage() {
   const [campaignName, setCampaignName] = useState("");
   const [limit, setLimit] = useState<string>("");
   const [deleteAfter, setDeleteAfter] = useState<string>("");
+  const [shuffle, setShuffle] = useState(true);
+  const [filterBots, setFilterBots] = useState(true);
   const [enqueueing, setEnqueueing] = useState(false);
   const [message, setMessage] = useState<
     { kind: "ok" | "err"; text: string } | null
@@ -115,16 +117,24 @@ export default function CampaignsPage() {
         delete_after_s: deleteAfter ? Number(deleteAfter) : null,
         campaign: campaignName || selectedSheet,
         limit: limit ? Number(limit) : null,
+        shuffle,
+        filter_bots: filterBots,
       });
       const totalEnqueued = Object.values(result.enqueued).reduce(
         (s, n) => s + n,
         0
       );
+      const filteredNote =
+        result.filtered_out > 0
+          ? ` · skipped ${result.filtered_out} likely bot/admin account${
+              result.filtered_out === 1 ? "" : "s"
+            }`
+          : "";
       setMessage({
         kind: "ok",
         text: `Queued ${totalEnqueued} DMs across ${
           Object.keys(result.enqueued).length
-        } accounts (from ${result.targets_found} sheet rows).`,
+        } accounts (from ${result.targets_found} sheet rows)${filteredNote}.`,
       });
       await refresh();
     } catch (e) {
@@ -292,6 +302,32 @@ export default function CampaignsPage() {
                   />
                 </div>
               </div>
+
+              <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={shuffle}
+                  onChange={(e) => setShuffle(e.target.checked)}
+                />
+                <span>
+                  Shuffle targets before applying limit (recommended — avoids
+                  hitting only the most-active posters / admins)
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={filterBots}
+                  onChange={(e) => setFilterBots(e.target.checked)}
+                />
+                <span>
+                  Filter bots / admins / official accounts (recommended —
+                  drops usernames ending in <code>bot</code> and names
+                  containing <code>admin</code>, <code>support</code>,
+                  <code>official</code>, <code>news</code>, etc.)
+                </span>
+              </label>
             </div>
 
             <div>
