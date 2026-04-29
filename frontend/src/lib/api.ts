@@ -1,5 +1,7 @@
 import type {
   Account,
+  CampaignArmInput,
+  CampaignStats,
   ProxyInput,
   QueueSnapshotEntry,
   ReplyEntry,
@@ -189,21 +191,35 @@ export const api = {
   enqueueFromSheet: (body: {
     sheet_group_name: string;
     account_ids: string[];
-    templates: string[];
     delete_after_s?: number | null;
     campaign?: string;
     limit?: number | null;
     shuffle?: boolean;
     filter_bots?: boolean;
+    // Multi-arm A/B form (preferred). Each arm carries its own templates +
+    // optional follow-up config; targets are split round-robin across arms.
+    arms?: CampaignArmInput[];
+    // Legacy single-arm form. Used when `arms` is omitted; backend converts
+    // to a single implicit arm named "A".
+    templates?: string[];
     follow_up_after_days?: number | null;
     follow_up_templates?: string[];
   }) =>
     request<{
-      enqueued: Record<string, number>;
+      // For multi-arm campaigns this is `{[account]: {[arm]: count}}`.
+      // For legacy single-arm requests it's still keyed by account but the
+      // inner value is a `{ A: count }` dict from the backend.
+      enqueued: Record<string, Record<string, number>>;
       targets_found: number;
       filtered_out: number;
+      arms?: string[];
     }>(`/api/campaigns/enqueue-from-sheet`, {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  getCampaignStats: (campaignName: string) =>
+    request<CampaignStats>(
+      `/api/campaigns/${encodeURIComponent(campaignName)}/stats`
+    ),
 };

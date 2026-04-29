@@ -143,6 +143,7 @@ async def enqueue(
     campaign: str = "",
     follow_up_after_days: Optional[int] = None,
     follow_up_templates: Optional[list[str]] = None,
+    arm: str = "A",
 ) -> int:
     """Add DM tasks to an account's queue.
 
@@ -152,6 +153,11 @@ async def enqueue(
     follow_up_after_days`` if `follow_up_after_days` was set on the
     primary's campaign config. The follow-up is cancelled if the recipient
     replies in the meantime (handled by reply_watcher).
+
+    `arm` is a free-form label identifying which A/B test arm this batch
+    belongs to. Defaults to "A" for single-arm (non-A/B) campaigns. Each
+    queue item carries its arm forward into the sent_log so the stats
+    endpoint can compute per-arm reply rates.
 
     Returns the number of primary items enqueued.
     """
@@ -170,6 +176,7 @@ async def enqueue(
             "templates": templates,
             "delete_after_s": delete_after_s,
             "campaign": campaign,
+            "arm": arm,
             "kind": "primary",
             # Items become eligible to send when scheduled_at <= now (UTC).
             "scheduled_at": now,
@@ -187,7 +194,10 @@ async def enqueue(
         queue = _load_queue()
         queue.setdefault(account_id, []).extend(items)
         _save_queue(queue)
-    logger.info(f"[{account_id}] enqueued {len(items)} targets (campaign={campaign!r})")
+    logger.info(
+        f"[{account_id}] enqueued {len(items)} targets "
+        f"(campaign={campaign!r}, arm={arm!r})"
+    )
     return len(items)
 
 
@@ -216,6 +226,65 @@ async def distribute_round_robin(
             campaign,
             follow_up_after_days=follow_up_after_days,
             follow_up_templates=follow_up_templates,
+        )
+    return counts
+
+
+async def distribute_arms_round_robin(
+    targets: list[dict],
+    account_ids: list[str],
+    arms: list[dict],
+    delete_after_s: Optional[int] = None,
+    campaign: str = "",
+) -> dict[str, dict[str, int]]:
+    """Split targets across BOTH accounts and arms round-robin.
+
+    Each `arm` dict carries its own template set:
+        {
+            "name": "A",
+            "primary_templates": ["..."],
+            "follow_up_after_days": 3,            # optional
+            "follow_up_templates": ["..."],       # optional
+        }
+
+    Target i is assigned to account ``account_ids[i % len(account_ids)]``
+    and arm ``arms[i % len(arms)]`` — so with N accounts and M arms, the
+    work is spread evenly across all N×M (account, arm) pairs and each
+    arm sees roughly the same target count, regardless of N or M.
+
+    Returns ``{account_id: {arm_name: enqueued_count}}``.
+    """
+    if not account_ids:
+        raise ValueError("account_ids must not be empty")
+    if not arms:
+        raise ValueError("arms must not be empty")
+
+    # Bucket targets by (account_id, arm_index).
+    buckets: dict[tuple[str, int], list[dict]] = {
+        (aid, ai): [] for aid in account_ids for ai in range(len(arms))
+    }
+    for i, t in enumerate(targets):
+        aid = account_ids[i % len(account_ids)]
+        ai = i % len(arms)
+        buckets[(aid, ai)].append(t)
+
+    counts: dict[str, dict[str, int]] = {aid: {} for aid in account_ids}
+    for (aid, ai), subset in buckets.items():
+        arm = arms[ai]
+        arm_name = arm.get("name") or chr(ord("A") + ai)
+        primary_templates = arm.get("primary_templates") or []
+        if not primary_templates or not subset:
+            counts[aid][arm_name] = 0
+            continue
+        counts[aid][arm_name] = await enqueue(
+            aid,
+            subset,
+            primary_templates,
+            delete_after_s,
+            campaign,
+            follow_up_after_days=arm.get("follow_up_after_days"),
+            follow_up_templates=arm.get("follow_up_templates") or [],
+            arm=arm_name,
         )
     return counts
 
@@ -257,6 +326,105 @@ async def sent_log_tail(limit: int = 50, account_id: Optional[str] = None) -> li
     if account_id is not None:
         log = [e for e in log if e.get("account_id") == account_id]
     return log[-limit:]
+
+
+async def campaign_arm_stats(campaign: str) -> dict:
+    """Compute per-arm send + reply counts for one campaign.
+
+    Joins ``sent_log.json`` (filtered to status='sent', kind='primary') with
+    ``replies.json`` on (account_id, target_user_id). A reply only counts if
+    we actually reached the target with a primary DM under this campaign +
+    arm — followup replies pile on the primary they answered.
+
+    Returns a dict shaped:
+        {
+            "campaign": "...",
+            "arms": [
+                {"name": "A", "sent": 50, "replied": 4, "reply_rate": 0.08},
+                {"name": "B", "sent": 50, "replied": 7, "reply_rate": 0.14},
+            ],
+            "winner": "B" | null,        # arm with highest rate (None if tie / no data)
+            "total_sent": 100,
+            "total_replied": 11,
+        }
+    """
+    from reply_watcher import _load_replies  # local import — avoid module cycle
+
+    async with _sent_log_lock:
+        log = _load_sent_log()
+
+    # (account_id, target_user_id) -> arm name. Keep only primary sends so
+    # a reply is attributed to the arm that actually opened the conversation.
+    primary_arm: dict[tuple[str, int], str] = {}
+    arm_sent: dict[str, int] = {}
+    for e in log:
+        if e.get("campaign") != campaign:
+            continue
+        if e.get("status") != "sent":
+            continue
+        if e.get("kind", "primary") != "primary":
+            continue
+        arm = e.get("arm", "A") or "A"
+        try:
+            uid = int(e.get("target_user_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        aid = e.get("account_id") or ""
+        if not uid or not aid:
+            continue
+        # First primary send wins if a target somehow got DM'd twice.
+        primary_arm.setdefault((aid, uid), arm)
+        arm_sent[arm] = arm_sent.get(arm, 0) + 1
+
+    arm_replied: dict[str, set[int]] = {}
+    if primary_arm:
+        replies = _load_replies()
+        for r in replies:
+            aid = r.get("account_id") or ""
+            try:
+                uid = int(r.get("sender_user_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if not uid or not aid:
+                continue
+            arm = primary_arm.get((aid, uid))
+            if arm is None:
+                continue
+            # Dedupe: one reply-er counted once per arm even if they sent N msgs.
+            arm_replied.setdefault(arm, set()).add(uid)
+
+    arm_names = sorted(arm_sent.keys())
+    arms_out: list[dict] = []
+    best_rate = -1.0
+    best_arm: Optional[str] = None
+    tie = False
+    for name in arm_names:
+        sent = arm_sent.get(name, 0)
+        replied = len(arm_replied.get(name, set()))
+        rate = (replied / sent) if sent > 0 else 0.0
+        arms_out.append(
+            {
+                "name": name,
+                "sent": sent,
+                "replied": replied,
+                "reply_rate": round(rate, 4),
+            }
+        )
+        if sent > 0:
+            if rate > best_rate:
+                best_rate = rate
+                best_arm = name
+                tie = False
+            elif rate == best_rate:
+                tie = True
+
+    return {
+        "campaign": campaign,
+        "arms": arms_out,
+        "winner": None if (tie or best_arm is None or best_rate <= 0) else best_arm,
+        "total_sent": sum(arm_sent.values()),
+        "total_replied": sum(len(v) for v in arm_replied.values()),
+    }
 
 
 # ---------- message rendering ----------
@@ -387,6 +555,7 @@ async def _enqueue_followup(account_id: str, primary_item: dict) -> None:
         "templates": templates,
         "delete_after_s": primary_item.get("delete_after_s"),
         "campaign": primary_item.get("campaign", ""),
+        "arm": primary_item.get("arm", "A"),
         "kind": "followup",
         "scheduled_at": fire_at,
         # Follow-ups don't trigger another follow-up.
@@ -412,6 +581,8 @@ async def _send_one(account_id: str, item: dict) -> dict:
         return {
             "account_id": account_id,
             "target_user_id": item["target_user_id"],
+            "campaign": item.get("campaign", ""),
+            "arm": item.get("arm", "A"),
             "status": "error",
             "reason": "account record vanished",
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -430,6 +601,7 @@ async def _send_one(account_id: str, item: dict) -> dict:
                     "target_user_id": item["target_user_id"],
                     "target_username": item.get("target_username", ""),
                     "campaign": item.get("campaign", ""),
+                    "arm": item.get("arm", "A"),
                     "kind": "followup",
                     "status": "skipped",
                     "reason": "recipient already replied — follow-up cancelled",
@@ -453,6 +625,7 @@ async def _send_one(account_id: str, item: dict) -> dict:
             "target_user_id": item["target_user_id"],
             "target_username": item.get("target_username", ""),
             "campaign": item.get("campaign", ""),
+            "arm": item.get("arm", "A"),
             "status": "error",
             "reason": str(e),
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -504,6 +677,7 @@ async def _send_one(account_id: str, item: dict) -> dict:
             "target_user_id": item["target_user_id"],
             "target_username": item["target_username"],
             "campaign": item.get("campaign", ""),
+            "arm": item.get("arm", "A"),
             "status": "skipped" if outcome.skip_target else "paused",
             "reason": outcome.reason,
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -527,6 +701,7 @@ async def _send_one(account_id: str, item: dict) -> dict:
         "target_user_id": item["target_user_id"],
         "target_username": item["target_username"],
         "campaign": item.get("campaign", ""),
+        "arm": item.get("arm", "A"),
         "kind": item.get("kind", "primary"),
         "message_id": sent.id,
         "status": "sent",

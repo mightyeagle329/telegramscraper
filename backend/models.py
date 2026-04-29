@@ -129,12 +129,26 @@ class DistributeRequest(BaseModel):
     follow_up_templates: Optional[list[str]] = None
 
 
+class CampaignArm(BaseModel):
+    """One A/B test arm. Each arm is its own template strategy.
+
+    Arms are run in parallel inside one campaign — targets are split evenly
+    across arms so we can fairly compare reply rates between strategies.
+    Each arm's name (e.g. "A", "B", "control", "gpt-opener") is stamped on
+    every send + reply record for reporting.
+    """
+
+    name: str
+    primary_templates: list[str]
+    follow_up_after_days: Optional[int] = None
+    follow_up_templates: Optional[list[str]] = None
+
+
 class CampaignFromSheetRequest(BaseModel):
     """Enqueue DMs using members pulled from an existing Google Sheet tab."""
 
     sheet_group_name: str
     account_ids: list[str]
-    templates: list[str]
     delete_after_s: Optional[int] = None
     campaign: str = ""
     limit: Optional[int] = None
@@ -150,9 +164,19 @@ class CampaignFromSheetRequest(BaseModel):
     # to True — these accounts almost always have privacy restrictions
     # and skip 100% of the time. Set False to bypass and try them anyway.
     filter_bots: bool = True
-    # Phase 2 follow-up: if a recipient hasn't replied N days after the
-    # primary DM, send them this template set as a nudge. Leave at None /
-    # empty list to disable (no follow-up scheduled).
+
+    # === A/B testing ===
+    # Phase 2B: define one or more `arms`, each with its own template set
+    # and (optional) follow-up config. Targets are split round-robin across
+    # arms so each arm sees roughly the same target count for fair
+    # reply-rate comparison.
+    arms: Optional[list[CampaignArm]] = None
+
+    # === Legacy single-arm fields (back-compat) ===
+    # If `arms` is omitted, we fall back to a single implicit arm built
+    # from these fields — preserves the pre-2B request shape so existing
+    # frontend builds keep working without redeploy.
+    templates: Optional[list[str]] = None
     follow_up_after_days: Optional[int] = None
     follow_up_templates: Optional[list[str]] = None
 

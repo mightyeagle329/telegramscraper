@@ -81,11 +81,36 @@ export interface SentLogEntry {
   target_user_id: number;
   target_username?: string;
   campaign?: string;
+  arm?: string;
   message_id?: number;
   kind?: "primary" | "followup";
   status: "sent" | "skipped" | "paused" | "error";
   reason?: string;
   timestamp: string;
+}
+
+/** One A/B test arm in a campaign request (frontend-built). */
+export interface CampaignArmInput {
+  name: string;
+  primary_templates: string[];
+  follow_up_after_days?: number | null;
+  follow_up_templates?: string[];
+}
+
+/** Per-arm reply rate report from `/api/campaigns/{name}/stats`. */
+export interface CampaignArmStat {
+  name: string;
+  sent: number;
+  replied: number;
+  reply_rate: number;
+}
+
+export interface CampaignStats {
+  campaign: string;
+  arms: CampaignArmStat[];
+  winner: string | null;
+  total_sent: number;
+  total_replied: number;
 }
 
 export interface ReplyEntry {

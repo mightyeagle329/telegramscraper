@@ -8,13 +8,46 @@ import {
   createTemplate,
   listTemplates,
 } from "@/lib/actions/templates";
-import TemplatePicker from "@/components/TemplatePicker";
+import ArmsEditor, { type ArmDraft } from "@/components/ArmsEditor";
 import type {
   Account,
+  CampaignArmInput,
+  CampaignStats,
   QueueSnapshotEntry,
   SentLogEntry,
 } from "@/lib/types";
 import type { DbMessageTemplate } from "@/types/database";
+
+const DEFAULT_PRIMARY_INLINE = [
+  "Hey {first_name}, saw you in the group — worth a quick chat?",
+  "Hi {first_name}! Quick question about the group we're both in.",
+  "Hello @{username}, hope today's good — got a sec?",
+].join("\n---\n");
+
+const DEFAULT_FOLLOWUP_INLINE = [
+  "Hey {first_name}, just bumping this in case you missed it — quick chat?",
+  "Hi {first_name}, following up — happy to share more if helpful.",
+  "{first_name}, last nudge — let me know if it's worth a chat or skip.",
+].join("\n---\n");
+
+function makeId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2);
+}
+
+function newArm(name: string, primaryInline = ""): ArmDraft {
+  return {
+    id: makeId(),
+    name,
+    primarySelectedIds: [],
+    primaryInline,
+    followUpDays: "",
+    followupSelectedIds: [],
+    followupInline: "",
+  };
+}
 
 export default function CampaignsPage() {
   const t = useT();
@@ -23,24 +56,15 @@ export default function CampaignsPage() {
   const [queue, setQueue] = useState<Record<string, QueueSnapshotEntry>>({});
   const [sentLog, setSentLog] = useState<SentLogEntry[]>([]);
 
-  // Saved templates loaded from Supabase. Empty when Supabase isn't
-  // configured OR the user hasn't created any yet.
   const [library, setLibrary] = useState<DbMessageTemplate[]>([]);
   const supabaseAvailable = isSupabaseConfigured();
 
   const [selectedSheet, setSelectedSheet] = useState("");
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
 
-  // Primary message — split into "library selections" + "inline textarea".
-  // The campaign uses BOTH combined.
-  const [primarySelectedIds, setPrimarySelectedIds] = useState<string[]>([]);
-  const [primaryInline, setPrimaryInline] = useState(
-    [
-      "Hey {first_name}, saw you in the group — worth a quick chat?",
-      "Hi {first_name}! Quick question about the group we're both in.",
-      "Hello @{username}, hope today's good — got a sec?",
-    ].join("\n---\n")
-  );
+  // A/B arms — start with one arm carrying the default placeholder text,
+  // so an unchanged form behaves exactly like pre-2B (single arm "A").
+  const [arms, setArms] = useState<ArmDraft[]>([newArm("A", DEFAULT_PRIMARY_INLINE)]);
 
   const [campaignName, setCampaignName] = useState("");
   const [limit, setLimit] = useState<string>("");
@@ -48,21 +72,15 @@ export default function CampaignsPage() {
   const [shuffle, setShuffle] = useState(true);
   const [filterBots, setFilterBots] = useState(true);
 
-  // Phase 2 — follow-up config (also library + inline).
-  const [followUpDays, setFollowUpDays] = useState<string>("");
-  const [followupSelectedIds, setFollowupSelectedIds] = useState<string[]>([]);
-  const [followupInline, setFollowupInline] = useState(
-    [
-      "Hey {first_name}, just bumping this in case you missed it — quick chat?",
-      "Hi {first_name}, following up — happy to share more if helpful.",
-      "{first_name}, last nudge — let me know if it's worth a chat or skip.",
-    ].join("\n---\n")
-  );
-
   const [enqueueing, setEnqueueing] = useState(false);
   const [message, setMessage] = useState<
     { kind: "ok" | "err"; text: string } | null
   >(null);
+
+  // Per-arm stats viewer — keyed by campaign name; pulled on demand.
+  const [statsCampaign, setStatsCampaign] = useState<string>("");
+  const [stats, setStats] = useState<CampaignStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -90,7 +108,6 @@ export default function CampaignsPage() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // Load saved-template library. Silent failure in local-dev mode.
   const loadLibrary = useCallback(async () => {
     const res = await listTemplates();
     if (res.ok) setLibrary(res.data);
@@ -100,8 +117,6 @@ export default function CampaignsPage() {
     loadLibrary();
   }, [loadLibrary]);
 
-  // Promote inline variants into the library — called from TemplatePicker
-  // when the user clicks "+ Save inline to library".
   async function saveInlineToLibrary(variants: string[]) {
     const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
     for (const body of variants) {
@@ -114,8 +129,11 @@ export default function CampaignsPage() {
     await loadLibrary();
   }
 
-  // Combine library-selected + inline-parsed into the final variant list.
-  function combineTemplates(selectedIds: string[], inline: string): string[] {
+  // Combine library + inline variants from one arm into a flat string list.
+  function combineForArm(
+    selectedIds: string[],
+    inline: string
+  ): string[] {
     const fromLibrary = library
       .filter((t) => selectedIds.includes(t.id))
       .map((t) => t.body);
@@ -126,9 +144,44 @@ export default function CampaignsPage() {
     return [...fromLibrary, ...fromInline];
   }
 
-  // Accounts that are selectable for a campaign. "warming" stays eligible
-  // because queued items will just wait until the account hits day 8 of
-  // warm-up; "paused" and "banned" are hard-excluded.
+  // Build the request `arms[]` payload from the editor drafts.
+  function buildArmsPayload(): { ok: true; arms: CampaignArmInput[] } | { ok: false; error: string } {
+    const out: CampaignArmInput[] = [];
+    const seenNames = new Set<string>();
+    for (const a of arms) {
+      const name = a.name.trim();
+      if (!name) {
+        return { ok: false, error: "Every arm needs a name (e.g. A, B, control)." };
+      }
+      if (seenNames.has(name.toUpperCase())) {
+        return { ok: false, error: `Duplicate arm name: ${name}.` };
+      }
+      seenNames.add(name.toUpperCase());
+
+      const primary = combineForArm(a.primarySelectedIds, a.primaryInline);
+      if (primary.length === 0) {
+        return {
+          ok: false,
+          error: `Arm "${name}" has no primary template. Add at least one variant.`,
+        };
+      }
+
+      const followDays = a.followUpDays ? Number(a.followUpDays) : NaN;
+      const wantsFollowup = Number.isFinite(followDays) && followDays > 0;
+      const followTemplates = wantsFollowup
+        ? combineForArm(a.followupSelectedIds, a.followupInline)
+        : [];
+
+      out.push({
+        name,
+        primary_templates: primary,
+        follow_up_after_days: wantsFollowup ? followDays : null,
+        follow_up_templates: followTemplates,
+      });
+    }
+    return { ok: true, arms: out };
+  }
+
   const eligibleAccounts = useMemo(
     () =>
       accounts.filter(
@@ -148,7 +201,6 @@ export default function CampaignsPage() {
 
   const enqueue = async () => {
     setMessage(null);
-    const templates = combineTemplates(primarySelectedIds, primaryInline);
     if (!selectedSheet) {
       setMessage({ kind: "err", text: "Pick a source sheet." });
       return;
@@ -160,33 +212,25 @@ export default function CampaignsPage() {
       });
       return;
     }
-    if (templates.length === 0) {
-      setMessage({
-        kind: "err",
-        text: "Add at least one message template (pick from library or write inline).",
-      });
+    const built = buildArmsPayload();
+    if (!built.ok) {
+      setMessage({ kind: "err", text: built.error });
       return;
     }
     setEnqueueing(true);
     try {
-      const followUpDaysN = followUpDays ? Number(followUpDays) : null;
-      const followUpTemplates = followUpDaysN
-        ? combineTemplates(followupSelectedIds, followupInline)
-        : [];
       const result = await api.enqueueFromSheet({
         sheet_group_name: selectedSheet,
         account_ids: selectedAccountIds,
-        templates,
+        arms: built.arms,
         delete_after_s: deleteAfter ? Number(deleteAfter) : null,
         campaign: campaignName || selectedSheet,
         limit: limit ? Number(limit) : null,
         shuffle,
         filter_bots: filterBots,
-        follow_up_after_days: followUpDaysN,
-        follow_up_templates: followUpTemplates,
       });
       const totalEnqueued = Object.values(result.enqueued).reduce(
-        (s, n) => s + n,
+        (s, perArm) => s + Object.values(perArm).reduce((x, n) => x + n, 0),
         0
       );
       const filteredNote =
@@ -195,12 +239,22 @@ export default function CampaignsPage() {
               result.filtered_out === 1 ? "" : "s"
             }`
           : "";
+      const armsNote =
+        built.arms.length > 1
+          ? ` across ${built.arms.length} arms (${built.arms
+              .map((a) => a.name)
+              .join("/")})`
+          : "";
       setMessage({
         kind: "ok",
         text: `Queued ${totalEnqueued} DMs across ${
           Object.keys(result.enqueued).length
-        } accounts (from ${result.targets_found} sheet rows)${filteredNote}.`,
+        } accounts${armsNote} (from ${result.targets_found} sheet rows)${filteredNote}.`,
       });
+      // Pre-load stats for this campaign so the user can watch the A/B
+      // race resolve over time.
+      const cName = campaignName || selectedSheet;
+      setStatsCampaign(cName);
       await refresh();
     } catch (e) {
       setMessage({
@@ -216,6 +270,43 @@ export default function CampaignsPage() {
     (s, q) => s + (q.pending ?? 0),
     0
   );
+
+  // Distinct campaign names from the recent sent log — used to populate the
+  // stats picker dropdown so the user can inspect any past campaign.
+  const knownCampaigns = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of sentLog) {
+      if (e.campaign) set.add(e.campaign);
+    }
+    return Array.from(set).sort();
+  }, [sentLog]);
+
+  // Pull stats whenever the user picks a campaign. Keep the result fresh
+  // by re-pulling on the same poll cycle as the queue (10s).
+  useEffect(() => {
+    if (!statsCampaign) {
+      setStats(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchStats = async () => {
+      setStatsLoading(true);
+      try {
+        const s = await api.getCampaignStats(statsCampaign);
+        if (!cancelled) setStats(s);
+      } catch {
+        if (!cancelled) setStats(null);
+      } finally {
+        if (!cancelled) setStatsLoading(false);
+      }
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [statsCampaign]);
 
   return (
     <>
@@ -271,7 +362,6 @@ export default function CampaignsPage() {
                     </div>
                   ) : (
                     accounts.map((a) => {
-                      // Allow selecting warming + active. Hard-block paused/banned.
                       const selectable =
                         a.status === "active" || a.status === "warming";
                       const isWarming = a.status === "warming";
@@ -396,71 +486,19 @@ export default function CampaignsPage() {
             </div>
 
             <div>
-              <label className="block text-xs uppercase text-text-muted mb-2">
-                Message templates — placeholders:{" "}
-                <code>{"{first_name}"}</code> <code>{"{last_name}"}</code>{" "}
-                <code>{"{username}"}</code>
-              </label>
-              <TemplatePicker
+              <ArmsEditor
+                arms={arms}
+                onChange={setArms}
                 libraryTemplates={library}
                 supabaseAvailable={supabaseAvailable}
-                selectedLibraryIds={primarySelectedIds}
-                onSelectedLibraryIdsChange={setPrimarySelectedIds}
-                inlineText={primaryInline}
-                onInlineTextChange={setPrimaryInline}
                 onSaveInlineToLibrary={saveInlineToLibrary}
-                rows={10}
-                placeholder={
-                  "Hey {first_name}, saw you in the group...\n---\nHi {first_name}! ..."
-                }
               />
-            </div>
-          </div>
-
-          {/* Phase 2 — follow-up config */}
-          <div className="mt-6 pt-5 border-t border-card-border/60 space-y-3">
-            <div className="flex flex-col md:flex-row md:items-end md:gap-4">
-              <div className="md:w-48">
-                <label className="block text-xs uppercase text-text-muted mb-1">
-                  Follow-up after (days)
-                  <span className="normal-case text-text-muted/70 ml-2">
-                    blank = off
-                  </span>
-                </label>
-                <input
-                  value={followUpDays}
-                  onChange={(e) => setFollowUpDays(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="off"
-                  className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm"
-                />
-              </div>
-              <p className="text-xs text-text-muted mt-2 md:mt-0 md:flex-1">
-                If a recipient hasn&apos;t replied N days after the primary
-                DM, send them a nudge. Auto-cancelled when they reply.
+              <p className="text-xs text-text-muted mt-3">
+                Placeholders: <code>{"{first_name}"}</code>{" "}
+                <code>{"{last_name}"}</code> <code>{"{username}"}</code>. Each
+                arm picks a template at random per send.
               </p>
             </div>
-
-            {followUpDays && Number(followUpDays) > 0 ? (
-              <div>
-                <label className="block text-xs uppercase text-text-muted mb-2">
-                  Follow-up templates
-                </label>
-                <TemplatePicker
-                  libraryTemplates={library}
-                  supabaseAvailable={supabaseAvailable}
-                  selectedLibraryIds={followupSelectedIds}
-                  onSelectedLibraryIdsChange={setFollowupSelectedIds}
-                  inlineText={followupInline}
-                  onInlineTextChange={setFollowupInline}
-                  onSaveInlineToLibrary={saveInlineToLibrary}
-                  rows={5}
-                  placeholder={
-                    "Hey {first_name}, just bumping this in case you missed it..."
-                  }
-                />
-              </div>
-            ) : null}
           </div>
 
           <div className="flex items-center justify-end mt-4">
@@ -472,6 +510,42 @@ export default function CampaignsPage() {
               {enqueueing ? t("campaigns.launching") : t("campaigns.launch")}
             </button>
           </div>
+        </section>
+
+        {/* A/B test stats — viewable for any campaign that has sent log entries */}
+        <section className="bg-card-bg border border-card-border rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+            <h2 className="text-lg font-semibold">A/B test results</h2>
+            <div className="flex items-center gap-2">
+              <select
+                value={statsCampaign}
+                onChange={(e) => setStatsCampaign(e.target.value)}
+                className="bg-background border border-card-border rounded-lg px-2 py-1 text-sm"
+              >
+                <option value="">— pick a campaign —</option>
+                {knownCampaigns.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {!statsCampaign ? (
+            <p className="text-text-muted text-sm">
+              Pick a campaign above to see per-arm reply rates. After ~50+
+              primary sends per arm, the winner column highlights the strategy
+              with the highest reply rate.
+            </p>
+          ) : statsLoading && !stats ? (
+            <p className="text-text-muted text-sm">Loading…</p>
+          ) : !stats || stats.arms.length === 0 ? (
+            <p className="text-text-muted text-sm">
+              No sends recorded yet for <strong>{statsCampaign}</strong>.
+            </p>
+          ) : (
+            <ArmStatsTable stats={stats} />
+          )}
         </section>
 
         <section className="grid md:grid-cols-2 gap-6">
@@ -543,6 +617,11 @@ export default function CampaignsPage() {
                       <span className="text-text-muted truncate">
                         {new Date(e.timestamp).toLocaleTimeString()}{" "}
                         {e.account_id} → {e.target_username || e.target_user_id}
+                        {e.arm && e.arm !== "A" ? (
+                          <span className="ml-1 text-accent-yellow">
+                            [{e.arm}]
+                          </span>
+                        ) : null}
                       </span>
                       <span
                         className={
@@ -565,5 +644,85 @@ export default function CampaignsPage() {
         </section>
       </main>
     </>
+  );
+}
+
+function ArmStatsTable({ stats }: { stats: CampaignStats }) {
+  const max = Math.max(...stats.arms.map((a) => a.reply_rate), 0);
+  return (
+    <div>
+      <div className="text-xs text-text-muted mb-2">
+        {stats.total_sent} primary sends · {stats.total_replied} replies
+        {stats.winner ? (
+          <>
+            {" "}
+            · winner: <strong className="text-accent-green">{stats.winner}</strong>
+          </>
+        ) : null}
+      </div>
+      <table className="w-full text-sm">
+        <thead className="text-text-muted">
+          <tr className="border-b border-card-border/60">
+            <th className="text-left py-1 font-normal">Arm</th>
+            <th className="text-right py-1 font-normal">Sent</th>
+            <th className="text-right py-1 font-normal">Replied</th>
+            <th className="text-right py-1 font-normal">Reply rate</th>
+            <th className="text-left py-1 font-normal w-1/3 pl-3">Bar</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stats.arms.map((a) => {
+            const isWinner = stats.winner === a.name;
+            const pct = (a.reply_rate * 100).toFixed(1);
+            const widthPct = max > 0 ? (a.reply_rate / max) * 100 : 0;
+            return (
+              <tr
+                key={a.name}
+                className="border-b border-card-border/30 last:border-b-0"
+              >
+                <td className="py-1.5">
+                  <span
+                    className={
+                      isWinner
+                        ? "font-bold text-accent-green"
+                        : "font-medium"
+                    }
+                  >
+                    {a.name}
+                  </span>
+                  {isWinner ? (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-accent-green">
+                      winner
+                    </span>
+                  ) : null}
+                </td>
+                <td className="text-right py-1.5 font-mono">{a.sent}</td>
+                <td className="text-right py-1.5 font-mono">{a.replied}</td>
+                <td className="text-right py-1.5 font-mono">{pct}%</td>
+                <td className="pl-3 py-1.5">
+                  <div className="h-2 bg-card-border/30 rounded overflow-hidden">
+                    <div
+                      className={
+                        isWinner
+                          ? "h-full bg-accent-green"
+                          : "h-full bg-accent-blue/60"
+                      }
+                      style={{ width: `${widthPct}%` }}
+                    />
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {stats.total_sent < stats.arms.length * 30 ? (
+        <p className="text-xs text-text-muted mt-2 italic">
+          Sample is small ({stats.total_sent} sends total). Reply-rate
+          differences below ~50 sends per arm are noisy — wait for more data
+          before declaring a winner.
+        </p>
+      ) : null}
+    </div>
   );
 }

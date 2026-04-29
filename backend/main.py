@@ -692,11 +692,49 @@ def _sheet_rows_to_targets(
 
 @app.post("/api/campaigns/enqueue-from-sheet")
 async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
-    """Pull members from a Google Sheet tab and distribute DM tasks round-robin."""
+    """Pull members from a Google Sheet tab and distribute DM tasks round-robin.
+
+    Two request shapes are supported:
+
+    - **Single arm (legacy)**: pass `templates` + optional `follow_up_*`
+      fields directly; the body runs as one arm named "A".
+    - **Multi-arm A/B test**: pass `arms=[{name, primary_templates,
+      follow_up_after_days?, follow_up_templates?}, ...]`. Targets are
+      split round-robin across (account, arm) pairs and each arm's name
+      is stamped on every send / reply for the stats endpoint.
+    """
     data = accounts_mod.load_accounts()
     for aid in req.account_ids:
         if aid not in data:
             raise HTTPException(status_code=404, detail=f"Account not found: {aid}")
+
+    # Resolve arms: prefer explicit `arms`, fall back to the legacy
+    # single-arm body so older frontends keep working.
+    if req.arms:
+        arms = [a.model_dump() for a in req.arms]
+    elif req.templates:
+        arms = [
+            {
+                "name": "A",
+                "primary_templates": req.templates,
+                "follow_up_after_days": req.follow_up_after_days,
+                "follow_up_templates": req.follow_up_templates,
+            }
+        ]
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Either `arms` or `templates` is required",
+        )
+
+    # Validate every arm has at least one primary template.
+    for a in arms:
+        if not a.get("primary_templates"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Arm {a.get('name')!r} has no primary_templates",
+            )
+
     try:
         rows = sheets_manager.get_all_members(req.sheet_group_name)
     except Exception as e:
@@ -709,24 +747,34 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
     )
     if not targets:
         return {
-            "enqueued": {aid: 0 for aid in req.account_ids},
+            "enqueued": {aid: {a["name"]: 0 for a in arms} for aid in req.account_ids},
             "targets_found": 0,
             "filtered_out": filtered_out,
+            "arms": [a["name"] for a in arms],
         }
-    counts = await sender.distribute_round_robin(
+    counts = await sender.distribute_arms_round_robin(
         targets=targets,
         account_ids=req.account_ids,
-        templates=req.templates,
+        arms=arms,
         delete_after_s=req.delete_after_s,
         campaign=req.campaign or req.sheet_group_name,
-        follow_up_after_days=req.follow_up_after_days,
-        follow_up_templates=req.follow_up_templates,
     )
     return {
         "enqueued": counts,
         "targets_found": len(targets),
         "filtered_out": filtered_out,
+        "arms": [a["name"] for a in arms],
     }
+
+
+@app.get("/api/campaigns/{campaign_name}/stats")
+async def campaign_stats(campaign_name: str):
+    """Per-arm reply rate for one campaign (A/B winner reporting).
+
+    Returns sent / replied / reply_rate per arm and a `winner` (the arm
+    with the highest reply rate, or `null` on a tie / no data yet).
+    """
+    return await sender.campaign_arm_stats(campaign_name)
 
 
 if __name__ == "__main__":
