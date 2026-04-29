@@ -55,6 +55,12 @@ logger = logging.getLogger(__name__)
 
 QUEUE_FILE = "queue.json"
 SENT_LOG_FILE = "sent_log.json"
+# Append-only set of every Telegram user_id we've successfully DM'd from
+# any account. Used by the campaign endpoint to globally dedupe targets so
+# the same person never gets a DM from two different sender accounts (or
+# from the same account twice across separate campaigns). Decoupled from
+# sent_log.json so it survives the rolling 10k-entry rotation.
+CONTACTED_FILE = "contacted.json"
 
 # Random delay between sends — jittered so two workers don't sync up.
 DELAY_RANGE_S = (45, 180)
@@ -76,6 +82,7 @@ SENT_LOG_MAX = 10_000
 _queue_lock = asyncio.Lock()
 _accounts_lock = asyncio.Lock()
 _sent_log_lock = asyncio.Lock()
+_contacted_lock = asyncio.Lock()
 
 # Active worker tasks, keyed by account_id.
 _workers: dict[str, asyncio.Task] = {}
@@ -130,6 +137,104 @@ async def _append_sent_log(entry: dict) -> None:
         log = _load_sent_log()
         log.append(entry)
         _save_sent_log(log)
+
+
+# ---------- contacted set (global dedupe) ----------
+
+
+def _bootstrap_contacted_from_sent_log() -> set[int]:
+    """Seed the contacted set from sent_log on first read.
+
+    Lets the dedupe feature work retroactively for projects that were
+    running before contacted.json existed — pulls every status='sent'
+    target_user_id from the audit log into the set.
+    """
+    out: set[int] = set()
+    if not os.path.exists(SENT_LOG_FILE):
+        return out
+    try:
+        with open(SENT_LOG_FILE, "r") as f:
+            log = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return out
+    if not isinstance(log, list):
+        return out
+    for e in log:
+        if e.get("status") != "sent":
+            continue
+        try:
+            uid = int(e.get("target_user_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if uid:
+            out.add(uid)
+    return out
+
+
+def _save_contacted_set(ids: set[int]) -> None:
+    try:
+        with open(CONTACTED_FILE, "w") as f:
+            # Sorted for stable diffs and easier grep when debugging.
+            json.dump(sorted(ids), f)
+    except IOError as e:
+        logger.error(f"Could not save contacted.json: {e}")
+
+
+def _load_contacted_set() -> set[int]:
+    """Read the global "already DM'd" user_id set.
+
+    On first run (no contacted.json yet), bootstraps from sent_log.json
+    AND persists the result, so subsequent reads don't re-walk the log.
+    """
+    if not os.path.exists(CONTACTED_FILE):
+        seeded = _bootstrap_contacted_from_sent_log()
+        if seeded:
+            _save_contacted_set(seeded)
+        return seeded
+    try:
+        with open(CONTACTED_FILE, "r") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return set()
+    if not isinstance(data, list):
+        return set()
+    out: set[int] = set()
+    for x in data:
+        try:
+            uid = int(x)
+        except (TypeError, ValueError):
+            continue
+        if uid:
+            out.add(uid)
+    return out
+
+
+def get_contacted_user_ids() -> set[int]:
+    """Public accessor used by the campaign endpoint to filter targets.
+
+    Returns a fresh set each call. The set is small (one int per contact)
+    even at hundreds of thousands of contacts, so we don't bother caching.
+    """
+    return _load_contacted_set()
+
+
+async def record_contacted(user_id: int) -> bool:
+    """Append a user_id to the contacted set. Idempotent.
+
+    Returns True if this was a new contact, False if it was already there.
+    Called from the worker after every successful primary send AND every
+    successful followup, so the dedupe set sees both "first touch" and
+    "re-touch" events.
+    """
+    if not user_id:
+        return False
+    async with _contacted_lock:
+        ids = _load_contacted_set()
+        if user_id in ids:
+            return False
+        ids.add(user_id)
+        _save_contacted_set(ids)
+        return True
 
 
 # ---------- public enqueue / queue API ----------
@@ -279,29 +384,46 @@ async def distribute_arms_round_robin(
     # AI mode: pre-generate openers per (arm_index → list[opener]) so each
     # target gets a unique line. We do this once per arm across ALL its
     # buckets so a target's opener doesn't depend on which account drew it.
+    # Two independent maps — primary AI and follow-up AI — because an arm
+    # can flip just one of them on (e.g. AI primary, templated nudge).
     # Map: arm_index -> {target_user_id -> opener_text}
-    ai_opener_by_arm: dict[int, dict[int, str]] = {}
-    for ai, arm in enumerate(arms):
-        style = (arm.get("ai_style") or "").strip()
-        if not style:
-            continue
-        # Collect every target across all account buckets for this arm.
-        arm_targets: list[dict] = []
+    ai_primary_by_arm: dict[int, dict[int, str]] = {}
+    ai_followup_by_arm: dict[int, dict[int, str]] = {}
+
+    def _arm_targets(ai: int) -> list[dict]:
+        out: list[dict] = []
         for aid in account_ids:
-            arm_targets.extend(buckets[(aid, ai)])
+            out.extend(buckets[(aid, ai)])
+        return out
+
+    for ai, arm in enumerate(arms):
+        primary_style = (arm.get("ai_style") or "").strip()
+        followup_style = (arm.get("follow_up_ai_style") or "").strip()
+        if not primary_style and not followup_style:
+            continue
+        arm_targets = _arm_targets(ai)
         if not arm_targets:
             continue
         from ai_openers import generate_openers_for_targets
 
-        openers = await generate_openers_for_targets(
-            arm_targets, group_name=group_name, style=style
-        )
-        # Index by user_id for O(1) lookup when we re-walk the buckets.
-        ai_opener_by_arm[ai] = {
-            int(t["user_id"]): openers[i]
-            for i, t in enumerate(arm_targets)
-            if t.get("user_id")
-        }
+        if primary_style:
+            openers = await generate_openers_for_targets(
+                arm_targets, group_name=group_name, style=primary_style
+            )
+            ai_primary_by_arm[ai] = {
+                int(t["user_id"]): openers[i]
+                for i, t in enumerate(arm_targets)
+                if t.get("user_id")
+            }
+        if followup_style:
+            f_openers = await generate_openers_for_targets(
+                arm_targets, group_name=group_name, style=followup_style
+            )
+            ai_followup_by_arm[ai] = {
+                int(t["user_id"]): f_openers[i]
+                for i, t in enumerate(arm_targets)
+                if t.get("user_id")
+            }
 
     counts: dict[str, dict[str, int]] = {aid: {} for aid in account_ids}
     for (aid, ai), subset in buckets.items():
@@ -311,44 +433,57 @@ async def distribute_arms_round_robin(
             counts[aid][arm_name] = 0
             continue
 
-        if ai in ai_opener_by_arm:
-            # AI mode — enqueue each target individually with its custom
-            # opener as the (only) template. We can't batch because each
-            # target gets different copy.
-            opener_map = ai_opener_by_arm[ai]
+        primary_ai = ai in ai_primary_by_arm
+        followup_ai = ai in ai_followup_by_arm
+        shared_primary = arm.get("primary_templates") or []
+        shared_followup = arm.get("follow_up_templates") or []
+        follow_days = arm.get("follow_up_after_days")
+
+        if primary_ai or followup_ai:
+            # At least one channel is per-target — enqueue each target
+            # individually so we can hand it its custom copy. Slower but
+            # rare path (only fires when AI mode is on for that channel).
             total = 0
             for t in subset:
                 uid = t.get("user_id")
                 if not uid:
                     continue
-                opener = opener_map.get(int(uid))
-                if not opener:
+                primary_for_t = (
+                    [ai_primary_by_arm[ai][int(uid)]]
+                    if primary_ai
+                    else shared_primary
+                )
+                followup_for_t = (
+                    [ai_followup_by_arm[ai][int(uid)]]
+                    if followup_ai
+                    else shared_followup
+                )
+                if not primary_for_t:
                     continue
                 total += await enqueue(
                     aid,
                     [t],
-                    [opener],
+                    primary_for_t,
                     delete_after_s,
                     campaign,
-                    follow_up_after_days=arm.get("follow_up_after_days"),
-                    follow_up_templates=arm.get("follow_up_templates") or [],
+                    follow_up_after_days=follow_days,
+                    follow_up_templates=followup_for_t,
                     arm=arm_name,
                 )
             counts[aid][arm_name] = total
         else:
-            # Template mode — single enqueue call with the shared template list.
-            primary_templates = arm.get("primary_templates") or []
-            if not primary_templates:
+            # All-shared (template mode for both channels) — batch enqueue.
+            if not shared_primary:
                 counts[aid][arm_name] = 0
                 continue
             counts[aid][arm_name] = await enqueue(
                 aid,
                 subset,
-                primary_templates,
+                shared_primary,
                 delete_after_s,
                 campaign,
-                follow_up_after_days=arm.get("follow_up_after_days"),
-                follow_up_templates=arm.get("follow_up_templates") or [],
+                follow_up_after_days=follow_days,
+                follow_up_templates=shared_followup,
                 arm=arm_name,
             )
     return counts
@@ -749,6 +884,13 @@ async def _send_one(account_id: str, item: dict) -> dict:
         }
 
     await _atomic_mark_send(account_id)
+    # Record this user as globally contacted so future campaigns dedupe
+    # against them. Safe to call for both primary and followup sends —
+    # both count as "we DM'd this person from one of our accounts".
+    try:
+        await record_contacted(int(item["target_user_id"]))
+    except (TypeError, ValueError):
+        pass
 
     # Optional send-delete tactic: delete our copy of the sent message after N seconds.
     delete_after = item.get("delete_after_s")

@@ -4,6 +4,27 @@ import { useMemo } from "react";
 import TemplatePicker from "@/components/TemplatePicker";
 import type { DbMessageTemplate } from "@/types/database";
 
+/**
+ * Default professional style instructions seeded into a new arm so the AI
+ * textarea is never empty (zero-input pitfall). The user can still rewrite
+ * them — these are just a sane starting point that produces decent first-
+ * touch openers without any tuning.
+ */
+export const DEFAULT_PRIMARY_AI_STYLE = [
+  "Write a brief, warm, professional outreach DM in the sender's voice.",
+  "Reference that we share a Telegram group as the reason for reaching out.",
+  "Ask one short, low-stakes question to start a conversation.",
+  "One or two sentences max. No emojis, no links, no salesy language.",
+  "Address the recipient by their first name when known.",
+].join(" ");
+
+export const DEFAULT_FOLLOWUP_AI_STYLE = [
+  "Write a brief, friendly follow-up DM nudging a previous unanswered message.",
+  "Don't sound pushy or apologetic — keep it casual.",
+  "One sentence. No emojis, no links, no recap of what you said before.",
+  "Address the recipient by their first name when known.",
+].join(" ");
+
 /** UI-only arm shape: same as CampaignArmInput but with picker state. */
 export interface ArmDraft {
   /** Stable id for React key reuse (NOT sent to backend). */
@@ -13,16 +34,18 @@ export interface ArmDraft {
   /**
    * "templates": rotate through static `primary_*` variants per send.
    * "ai":        generate a personalised opener per target via OpenAI
-   *              (uses `aiStyle` instructions). Follow-ups are still
-   *              templated — AI mode only changes the first-touch DM.
+   *              (uses `aiStyle` instructions). The two modes are
+   *              independent for primary and follow-up — you can have a
+   *              templated primary with an AI follow-up, or vice versa.
    */
   mode: "templates" | "ai";
-  /** Free-form style instructions for AI mode (one-liner is fine). */
   aiStyle: string;
   primarySelectedIds: string[];
   primaryInline: string;
   /** Empty string = no follow-up for this arm. */
   followUpDays: string;
+  followupMode: "templates" | "ai";
+  followupAiStyle: string;
   followupSelectedIds: string[];
   followupInline: string;
 }
@@ -40,16 +63,35 @@ interface Props {
 }
 
 /**
- * Multi-arm A/B test editor. Each arm is its own template strategy with
- * primary + (optional) follow-up. Targets are split round-robin across
- * arms by the backend, so 100 contacts with 2 arms = 50 to each arm.
+ * Build a fresh arm with sensible defaults — including pre-filled AI
+ * style prompts so toggling to AI mode doesn't show a blank textarea.
+ */
+export function makeArm(name: string, primaryInline = ""): ArmDraft {
+  return {
+    id: cryptoRandomId(),
+    name,
+    mode: "templates",
+    aiStyle: DEFAULT_PRIMARY_AI_STYLE,
+    primarySelectedIds: [],
+    primaryInline,
+    followUpDays: "",
+    followupMode: "templates",
+    followupAiStyle: DEFAULT_FOLLOWUP_AI_STYLE,
+    followupSelectedIds: [],
+    followupInline: "",
+  };
+}
+
+/**
+ * Multi-arm A/B test editor. Each arm has its own primary + (optional)
+ * follow-up message strategy. Targets are split round-robin across arms
+ * by the backend, so 100 contacts with 2 arms = 50 to each arm.
  *
  * UX rules:
  *  - Always at least one arm. Removing the last arm is blocked.
- *  - Arms auto-name to letters (A, B, C...) when added but the user can
- *    rename inline (we don't enforce uniqueness here — the backend does).
- *  - Adding a 2nd arm makes the layout switch from "single template editor"
- *    to "stacked arm cards" so users see they're now A/B testing.
+ *  - Adding a 2nd arm flips the layout to A/B mode (color-coded cards).
+ *  - Each message slot (primary / follow-up) has independent Templates/AI
+ *    toggles so you can mix and match.
  */
 export default function ArmsEditor({
   arms,
@@ -68,18 +110,7 @@ export default function ArmsEditor({
 
   function addArm() {
     const nextLetter = nextArmLetter(arms.map((a) => a.name));
-    const newArm: ArmDraft = {
-      id: cryptoRandomId(),
-      name: nextLetter,
-      mode: "templates",
-      aiStyle: "",
-      primarySelectedIds: [],
-      primaryInline: "",
-      followUpDays: "",
-      followupSelectedIds: [],
-      followupInline: "",
-    };
-    onChange([...arms, newArm]);
+    onChange([...arms, makeArm(nextLetter)]);
   }
 
   function removeArm(id: string) {
@@ -94,7 +125,7 @@ export default function ArmsEditor({
           <div className="text-xs uppercase text-text-muted">
             {isAB
               ? `A/B test — ${arms.length} arms running in parallel`
-              : "Message templates"}
+              : "Message strategy"}
           </div>
           {isAB ? (
             <p className="text-xs text-text-muted/80 mt-0.5">
@@ -166,14 +197,11 @@ function ArmCard({
     [arm.followUpDays]
   );
 
-  // Visual color cycle so two arms are easy to tell apart at a glance.
   const tone = TONES[index % TONES.length];
 
   return (
     <div
-      className={`border rounded-xl p-4 space-y-3 ${
-        isAB ? `border-${tone.border} bg-${tone.bg}` : "border-card-border"
-      }`}
+      className="border rounded-xl p-4 space-y-4"
       style={
         isAB
           ? { borderColor: tone.borderHex, background: tone.bgHex }
@@ -208,86 +236,29 @@ function ArmCard({
         ) : null}
       </div>
 
-      <div>
-        <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
-          <label className="text-xs uppercase text-text-muted">
-            Primary message
-          </label>
-          <div className="inline-flex border border-card-border rounded-lg overflow-hidden text-xs">
-            <button
-              type="button"
-              onClick={() => onChange({ mode: "templates" })}
-              className={`px-3 py-1 transition-colors ${
-                arm.mode === "templates"
-                  ? "bg-card-border/40 text-foreground"
-                  : "text-text-muted hover:text-foreground"
-              }`}
-            >
-              Templates
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!aiAvailable) return;
-                onChange({ mode: "ai" });
-              }}
-              disabled={!aiAvailable}
-              title={
-                aiAvailable
-                  ? "Generate a personalized opener per target"
-                  : "Set OPENAI_API_KEY in backend/.env to enable AI mode"
-              }
-              className={`px-3 py-1 transition-colors border-l border-card-border ${
-                arm.mode === "ai"
-                  ? "bg-card-border/40 text-foreground"
-                  : "text-text-muted hover:text-foreground"
-              } disabled:opacity-40 disabled:cursor-not-allowed`}
-            >
-              AI ({aiModel})
-            </button>
-          </div>
-        </div>
-
-        {arm.mode === "templates" ? (
-          <TemplatePicker
-            libraryTemplates={libraryTemplates}
-            supabaseAvailable={supabaseAvailable}
-            selectedLibraryIds={arm.primarySelectedIds}
-            onSelectedLibraryIdsChange={(ids) =>
-              onChange({ primarySelectedIds: ids })
-            }
-            inlineText={arm.primaryInline}
-            onInlineTextChange={(s) => onChange({ primaryInline: s })}
-            onSaveInlineToLibrary={onSaveInlineToLibrary}
-            rows={6}
-            placeholder={
-              "Hey {first_name}, saw you in the group...\n---\nHi {first_name}! ..."
-            }
-          />
-        ) : (
-          <div className="space-y-2">
-            <textarea
-              value={arm.aiStyle}
-              onChange={(e) => onChange({ aiStyle: e.target.value })}
-              rows={6}
-              placeholder={[
-                "Style instructions for GPT — written like you're briefing a copywriter.",
-                "",
-                "Example:",
-                "Friendly and casual. Mention I'm building Telegram outreach automation",
-                "and ask if they'd be open to a 10-min chat. One sentence max, no emojis.",
-              ].join("\n")}
-              className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm font-mono"
-            />
-            <p className="text-xs text-text-muted">
-              Each target gets a unique opener generated at launch time
-              using their first name + the source group as context. Cost
-              is paid up front (~$0.0001 per opener with{" "}
-              <code>{aiModel}</code>) — small but predictable.
-            </p>
-          </div>
-        )}
-      </div>
+      <MessagePicker
+        label="Primary message"
+        mode={arm.mode}
+        onModeChange={(m) => onChange({ mode: m })}
+        aiStyle={arm.aiStyle}
+        onAiStyleChange={(s) => onChange({ aiStyle: s })}
+        aiPlaceholder={DEFAULT_PRIMARY_AI_STYLE}
+        templatePlaceholder={
+          "Hey {first_name}, saw you in the group...\n---\nHi {first_name}! ..."
+        }
+        templateRows={6}
+        selectedLibraryIds={arm.primarySelectedIds}
+        onSelectedLibraryIdsChange={(ids) =>
+          onChange({ primarySelectedIds: ids })
+        }
+        inlineText={arm.primaryInline}
+        onInlineTextChange={(s) => onChange({ primaryInline: s })}
+        libraryTemplates={libraryTemplates}
+        supabaseAvailable={supabaseAvailable}
+        aiAvailable={aiAvailable}
+        aiModel={aiModel}
+        onSaveInlineToLibrary={onSaveInlineToLibrary}
+      />
 
       <div className="flex items-end gap-3">
         <div className="w-40">
@@ -308,58 +279,152 @@ function ArmCard({
       </div>
 
       {showFollowup ? (
-        <div>
-          <label className="block text-xs uppercase text-text-muted mb-2">
-            Follow-up templates
-          </label>
-          <TemplatePicker
-            libraryTemplates={libraryTemplates}
-            supabaseAvailable={supabaseAvailable}
-            selectedLibraryIds={arm.followupSelectedIds}
-            onSelectedLibraryIdsChange={(ids) =>
-              onChange({ followupSelectedIds: ids })
-            }
-            inlineText={arm.followupInline}
-            onInlineTextChange={(s) => onChange({ followupInline: s })}
-            onSaveInlineToLibrary={onSaveInlineToLibrary}
-            rows={4}
-            placeholder={"Hey {first_name}, just bumping this..."}
-          />
-        </div>
+        <MessagePicker
+          label="Follow-up message"
+          mode={arm.followupMode}
+          onModeChange={(m) => onChange({ followupMode: m })}
+          aiStyle={arm.followupAiStyle}
+          onAiStyleChange={(s) => onChange({ followupAiStyle: s })}
+          aiPlaceholder={DEFAULT_FOLLOWUP_AI_STYLE}
+          templatePlaceholder={"Hey {first_name}, just bumping this..."}
+          templateRows={4}
+          selectedLibraryIds={arm.followupSelectedIds}
+          onSelectedLibraryIdsChange={(ids) =>
+            onChange({ followupSelectedIds: ids })
+          }
+          inlineText={arm.followupInline}
+          onInlineTextChange={(s) => onChange({ followupInline: s })}
+          libraryTemplates={libraryTemplates}
+          supabaseAvailable={supabaseAvailable}
+          aiAvailable={aiAvailable}
+          aiModel={aiModel}
+          onSaveInlineToLibrary={onSaveInlineToLibrary}
+        />
       ) : null}
     </div>
   );
 }
 
-// Hard-coded hex tokens because Tailwind 4 won't generate dynamic class names.
+interface MessagePickerProps {
+  label: string;
+  mode: "templates" | "ai";
+  onModeChange: (m: "templates" | "ai") => void;
+  aiStyle: string;
+  onAiStyleChange: (s: string) => void;
+  aiPlaceholder: string;
+  templatePlaceholder: string;
+  templateRows: number;
+  selectedLibraryIds: string[];
+  onSelectedLibraryIdsChange: (ids: string[]) => void;
+  inlineText: string;
+  onInlineTextChange: (s: string) => void;
+  libraryTemplates: DbMessageTemplate[];
+  supabaseAvailable: boolean;
+  aiAvailable: boolean;
+  aiModel: string;
+  onSaveInlineToLibrary?: (variants: string[]) => Promise<void>;
+}
+
+/**
+ * One message slot (primary or follow-up) with a Templates / AI toggle.
+ * Extracted so primary and follow-up share the same UX and validation
+ * exactly — when we add another option (e.g. file-imported variants) it
+ * lands in both places at once.
+ */
+function MessagePicker(props: MessagePickerProps) {
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+        <label className="text-xs uppercase text-text-muted">
+          {props.label}
+        </label>
+        <div className="inline-flex border border-card-border rounded-lg overflow-hidden text-xs">
+          <button
+            type="button"
+            onClick={() => props.onModeChange("templates")}
+            className={`px-3 py-1 transition-colors ${
+              props.mode === "templates"
+                ? "bg-card-border/40 text-foreground"
+                : "text-text-muted hover:text-foreground"
+            }`}
+          >
+            Templates
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              if (!props.aiAvailable) return;
+              props.onModeChange("ai");
+            }}
+            disabled={!props.aiAvailable}
+            title={
+              props.aiAvailable
+                ? "Generate a personalized opener per target"
+                : "Set OPENAI_API_KEY in backend/.env to enable AI mode"
+            }
+            className={`px-3 py-1 transition-colors border-l border-card-border ${
+              props.mode === "ai"
+                ? "bg-card-border/40 text-foreground"
+                : "text-text-muted hover:text-foreground"
+            } disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            AI ({props.aiModel})
+          </button>
+        </div>
+      </div>
+
+      {props.mode === "templates" ? (
+        <TemplatePicker
+          libraryTemplates={props.libraryTemplates}
+          supabaseAvailable={props.supabaseAvailable}
+          selectedLibraryIds={props.selectedLibraryIds}
+          onSelectedLibraryIdsChange={props.onSelectedLibraryIdsChange}
+          inlineText={props.inlineText}
+          onInlineTextChange={props.onInlineTextChange}
+          onSaveInlineToLibrary={props.onSaveInlineToLibrary}
+          rows={props.templateRows}
+          placeholder={props.templatePlaceholder}
+        />
+      ) : (
+        <div className="space-y-2">
+          <textarea
+            value={props.aiStyle}
+            onChange={(e) => props.onAiStyleChange(e.target.value)}
+            rows={5}
+            placeholder={props.aiPlaceholder}
+            className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm"
+          />
+          <p className="text-xs text-text-muted">
+            Each target gets a unique line generated at launch using their
+            first name + the source group as context. Cost ~$0.0001 per
+            opener with <code>{props.aiModel}</code> — small + paid up front.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const TONES = [
   {
-    border: "accent-green/40",
-    bg: "accent-green/5",
     borderHex: "rgba(74, 222, 128, 0.35)",
     bgHex: "rgba(74, 222, 128, 0.04)",
     chipHex: "rgba(74, 222, 128, 0.15)",
     chipTextHex: "rgb(74, 222, 128)",
   },
   {
-    border: "accent-blue/40",
-    bg: "accent-blue/5",
     borderHex: "rgba(96, 165, 250, 0.35)",
     bgHex: "rgba(96, 165, 250, 0.04)",
     chipHex: "rgba(96, 165, 250, 0.15)",
     chipTextHex: "rgb(96, 165, 250)",
   },
   {
-    border: "accent-yellow/40",
-    bg: "accent-yellow/5",
     borderHex: "rgba(250, 204, 21, 0.35)",
     bgHex: "rgba(250, 204, 21, 0.04)",
     chipHex: "rgba(250, 204, 21, 0.15)",
     chipTextHex: "rgb(250, 204, 21)",
   },
   {
-    border: "accent-red/40",
-    bg: "accent-red/5",
     borderHex: "rgba(248, 113, 113, 0.35)",
     bgHex: "rgba(248, 113, 113, 0.04)",
     chipHex: "rgba(248, 113, 113, 0.15)",

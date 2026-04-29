@@ -8,7 +8,7 @@ import {
   createTemplate,
   listTemplates,
 } from "@/lib/actions/templates";
-import ArmsEditor, { type ArmDraft } from "@/components/ArmsEditor";
+import ArmsEditor, { makeArm, type ArmDraft } from "@/components/ArmsEditor";
 import type {
   Account,
   CampaignArmInput,
@@ -23,33 +23,6 @@ const DEFAULT_PRIMARY_INLINE = [
   "Hi {first_name}! Quick question about the group we're both in.",
   "Hello @{username}, hope today's good — got a sec?",
 ].join("\n---\n");
-
-const DEFAULT_FOLLOWUP_INLINE = [
-  "Hey {first_name}, just bumping this in case you missed it — quick chat?",
-  "Hi {first_name}, following up — happy to share more if helpful.",
-  "{first_name}, last nudge — let me know if it's worth a chat or skip.",
-].join("\n---\n");
-
-function makeId() {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2);
-}
-
-function newArm(name: string, primaryInline = ""): ArmDraft {
-  return {
-    id: makeId(),
-    name,
-    mode: "templates",
-    aiStyle: "",
-    primarySelectedIds: [],
-    primaryInline,
-    followUpDays: "",
-    followupSelectedIds: [],
-    followupInline: "",
-  };
-}
 
 export default function CampaignsPage() {
   const t = useT();
@@ -71,13 +44,16 @@ export default function CampaignsPage() {
 
   // A/B arms — start with one arm carrying the default placeholder text,
   // so an unchanged form behaves exactly like pre-2B (single arm "A").
-  const [arms, setArms] = useState<ArmDraft[]>([newArm("A", DEFAULT_PRIMARY_INLINE)]);
+  const [arms, setArms] = useState<ArmDraft[]>([
+    makeArm("A", DEFAULT_PRIMARY_INLINE),
+  ]);
 
   const [campaignName, setCampaignName] = useState("");
   const [limit, setLimit] = useState<string>("");
   const [deleteAfter, setDeleteAfter] = useState<string>("");
   const [shuffle, setShuffle] = useState(true);
   const [filterBots, setFilterBots] = useState(true);
+  const [dedupeContacted, setDedupeContacted] = useState(true);
 
   const [enqueueing, setEnqueueing] = useState(false);
   const [message, setMessage] = useState<
@@ -179,46 +155,74 @@ export default function CampaignsPage() {
 
       const followDays = a.followUpDays ? Number(a.followUpDays) : NaN;
       const wantsFollowup = Number.isFinite(followDays) && followDays > 0;
-      const followTemplates = wantsFollowup
-        ? combineForArm(a.followupSelectedIds, a.followupInline)
-        : [];
 
+      // Resolve primary side.
+      let primary_templates: string[] | undefined;
+      let ai_style: string | undefined;
       if (a.mode === "ai") {
         const style = a.aiStyle.trim();
         if (!style) {
           return {
             ok: false,
-            error: `Arm "${name}" is in AI mode but has no style instructions. Tell GPT how the opener should sound.`,
+            error: `Arm "${name}" — primary AI style is empty. Tell GPT how the opener should sound.`,
           };
         }
         if (!aiAvailable) {
           return {
             ok: false,
-            error: `Arm "${name}" is in AI mode but OPENAI_API_KEY isn't set on the backend.`,
+            error: `Arm "${name}" uses AI mode but OPENAI_API_KEY isn't set on the backend.`,
           };
         }
-        out.push({
-          name,
-          ai_style: style,
-          follow_up_after_days: wantsFollowup ? followDays : null,
-          follow_up_templates: followTemplates,
-        });
-        continue;
+        ai_style = style;
+      } else {
+        const primary = combineForArm(a.primarySelectedIds, a.primaryInline);
+        if (primary.length === 0) {
+          return {
+            ok: false,
+            error: `Arm "${name}" — primary message is empty. Add at least one template variant.`,
+          };
+        }
+        primary_templates = primary;
       }
 
-      const primary = combineForArm(a.primarySelectedIds, a.primaryInline);
-      if (primary.length === 0) {
-        return {
-          ok: false,
-          error: `Arm "${name}" has no primary template. Add at least one variant.`,
-        };
+      // Resolve follow-up side. Only validates when follow-up is enabled.
+      let follow_up_templates: string[] | undefined;
+      let follow_up_ai_style: string | undefined;
+      if (wantsFollowup) {
+        if (a.followupMode === "ai") {
+          const style = a.followupAiStyle.trim();
+          if (!style) {
+            return {
+              ok: false,
+              error: `Arm "${name}" — follow-up AI style is empty. Tell GPT how the nudge should sound.`,
+            };
+          }
+          if (!aiAvailable) {
+            return {
+              ok: false,
+              error: `Arm "${name}" follow-up uses AI mode but OPENAI_API_KEY isn't set on the backend.`,
+            };
+          }
+          follow_up_ai_style = style;
+        } else {
+          const f = combineForArm(a.followupSelectedIds, a.followupInline);
+          if (f.length === 0) {
+            return {
+              ok: false,
+              error: `Arm "${name}" — follow-up is enabled but has no template. Add at least one variant or switch to AI.`,
+            };
+          }
+          follow_up_templates = f;
+        }
       }
 
       out.push({
         name,
-        primary_templates: primary,
+        primary_templates,
+        ai_style,
         follow_up_after_days: wantsFollowup ? followDays : null,
-        follow_up_templates: followTemplates,
+        follow_up_templates,
+        follow_up_ai_style,
       });
     }
     return { ok: true, arms: out };
@@ -270,6 +274,7 @@ export default function CampaignsPage() {
         limit: limit ? Number(limit) : null,
         shuffle,
         filter_bots: filterBots,
+        dedupe_already_contacted: dedupeContacted,
       });
       const totalEnqueued = Object.values(result.enqueued).reduce(
         (s, perArm) => s + Object.values(perArm).reduce((x, n) => x + n, 0),
@@ -279,6 +284,12 @@ export default function CampaignsPage() {
         result.filtered_out > 0
           ? ` · skipped ${result.filtered_out} likely bot/admin account${
               result.filtered_out === 1 ? "" : "s"
+            }`
+          : "";
+      const dedupeNote =
+        result.deduped_out > 0
+          ? ` · skipped ${result.deduped_out} already-contacted user${
+              result.deduped_out === 1 ? "" : "s"
             }`
           : "";
       const armsNote =
@@ -291,7 +302,7 @@ export default function CampaignsPage() {
         kind: "ok",
         text: `Queued ${totalEnqueued} DMs across ${
           Object.keys(result.enqueued).length
-        } accounts${armsNote} (from ${result.targets_found} sheet rows)${filteredNote}.`,
+        } accounts${armsNote} (from ${result.targets_found} sheet rows)${filteredNote}${dedupeNote}.`,
       });
       // Pre-load stats for this campaign so the user can watch the A/B
       // race resolve over time.
@@ -530,6 +541,20 @@ export default function CampaignsPage() {
                   drops usernames ending in <code>bot</code> and names
                   containing <code>admin</code>, <code>support</code>,
                   <code>official</code>, <code>news</code>, etc.)
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={dedupeContacted}
+                  onChange={(e) => setDedupeContacted(e.target.checked)}
+                />
+                <span>
+                  Skip users we&apos;ve already DM&apos;d from any account
+                  (recommended — prevents accidentally double-messaging the
+                  same person across campaigns or sender accounts). Uncheck
+                  to deliberately re-target a previously-contacted cohort.
                 </span>
               </label>
             </div>

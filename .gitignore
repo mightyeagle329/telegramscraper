@@ -27,6 +27,8 @@ backend/groups.json
 backend/accounts.json
 backend/queue.json
 backend/sent_log.json
+backend/replies.json
+backend/contacted.json
 backend/warmup_groups.json
 
 # ─── Python build artifacts ─────────────────────────────────────────

@@ -728,13 +728,12 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
             detail="Either `arms` or `templates` is required",
         )
 
-    # Validate every arm has either templates OR an ai_style. Mutually
-    # exclusive — set one or the other, not both. If AI mode is requested
-    # but the API key isn't configured, refuse early with a helpful error.
+    # Validate every arm has a primary message (templates OR AI). Validate
+    # follow-up too if it was requested. Any AI mode requires the key.
     for a in arms:
-        has_templates = bool(a.get("primary_templates"))
-        has_ai = bool((a.get("ai_style") or "").strip())
-        if not has_templates and not has_ai:
+        has_p_templates = bool(a.get("primary_templates"))
+        has_p_ai = bool((a.get("ai_style") or "").strip())
+        if not has_p_templates and not has_p_ai:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -742,11 +741,23 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
                     f"or ai_style"
                 ),
             )
-        if has_ai and not ai_openers.is_configured():
+        follow_days = a.get("follow_up_after_days")
+        wants_followup = bool(follow_days and int(follow_days) > 0)
+        has_f_templates = bool(a.get("follow_up_templates"))
+        has_f_ai = bool((a.get("follow_up_ai_style") or "").strip())
+        if wants_followup and not has_f_templates and not has_f_ai:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Arm {a.get('name')!r} is in AI mode but OPENAI_API_KEY "
+                    f"Arm {a.get('name')!r} has follow_up_after_days set but "
+                    f"no follow_up_templates or follow_up_ai_style"
+                ),
+            )
+        if (has_p_ai or (wants_followup and has_f_ai)) and not ai_openers.is_configured():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Arm {a.get('name')!r} uses AI mode but OPENAI_API_KEY "
                     f"is not set on the backend (add it to backend/.env)"
                 ),
             )
@@ -761,11 +772,24 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         shuffle=req.shuffle,
         filter_bots=req.filter_bots,
     )
+
+    # Global dedupe — drop anyone we've already DM'd from any account.
+    # Done AFTER sheet parsing + bot filter but BEFORE distribution so the
+    # `enqueued` counts reflect only fresh contacts.
+    deduped_out = 0
+    if req.dedupe_already_contacted and targets:
+        already = sender.get_contacted_user_ids()
+        if already:
+            before = len(targets)
+            targets = [t for t in targets if int(t["user_id"]) not in already]
+            deduped_out = before - len(targets)
+
     if not targets:
         return {
             "enqueued": {aid: {a["name"]: 0 for a in arms} for aid in req.account_ids},
             "targets_found": 0,
             "filtered_out": filtered_out,
+            "deduped_out": deduped_out,
             "arms": [a["name"] for a in arms],
         }
     try:
@@ -789,6 +813,7 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         "enqueued": counts,
         "targets_found": len(targets),
         "filtered_out": filtered_out,
+        "deduped_out": deduped_out,
         "arms": [a["name"] for a in arms],
     }
 

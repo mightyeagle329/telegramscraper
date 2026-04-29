@@ -155,6 +155,10 @@ class CampaignArm(BaseModel):
     ai_style: Optional[str] = None
     follow_up_after_days: Optional[int] = None
     follow_up_templates: Optional[list[str]] = None
+    # Optional AI mode for the follow-up nudge — generated up front at
+    # campaign launch alongside the primary opener (so cost and failure
+    # mode stay predictable). When set, ``follow_up_templates`` is ignored.
+    follow_up_ai_style: Optional[str] = None
 
 
 class CampaignFromSheetRequest(BaseModel):
@@ -177,6 +181,13 @@ class CampaignFromSheetRequest(BaseModel):
     # to True — these accounts almost always have privacy restrictions
     # and skip 100% of the time. Set False to bypass and try them anyway.
     filter_bots: bool = True
+    # Drop targets that any of our sender accounts has previously DM'd
+    # successfully. Reads `contacted.json` (a global, append-only set
+    # written by the sender on every successful send). Defaults True —
+    # the typical case is "don't double-message anyone." Set False when
+    # you specifically want to re-target a previously-DM'd cohort (e.g.
+    # testing a new arm against an audience that already heard arm A).
+    dedupe_already_contacted: bool = True
 
     # === A/B testing ===
     # Phase 2B: define one or more `arms`, each with its own template set

@@ -102,6 +102,7 @@ export interface CampaignArmInput {
   ai_style?: string;
   follow_up_after_days?: number | null;
   follow_up_templates?: string[];
+  follow_up_ai_style?: string;
 }
 
 export interface AIStatus {
