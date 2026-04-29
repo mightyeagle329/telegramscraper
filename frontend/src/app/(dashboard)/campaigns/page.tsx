@@ -308,13 +308,14 @@ export default function CampaignsPage() {
       // race resolve over time.
       const cName = campaignName || selectedSheet;
       setStatsCampaign(cName);
-      // Clear the per-launch fields (sheet / limit / campaign name) so the
-      // form visibly "resets" without forcing the user to retype arms or
-      // re-select accounts. Re-aim the same A/B at a new audience by just
-      // picking a new sheet.
+      // Full reset of the campaign box so the next launch starts from a
+      // clean state. Keeps user preferences (accounts, shuffle/filter/dedup
+      // toggles) since those are stable across campaigns; resets the rest.
       setSelectedSheet("");
       setLimit("");
       setCampaignName("");
+      setDeleteAfter("");
+      setArms([makeArm("A", DEFAULT_PRIMARY_INLINE)]);
       await refresh();
     } catch (e) {
       setMessage({

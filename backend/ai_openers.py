@@ -101,9 +101,11 @@ def _build_user_prompt(
     `target` matches the sender target shape (user_id + first_name +
     last_name + username). Missing fields render as ``unknown``.
     """
-    first = (target.get("first_name") or "").strip()
-    last = (target.get("last_name") or "").strip()
-    username = (target.get("username") or "").strip()
+    # Coerce to str defensively — gspread can hand us int/float values for
+    # cells that look numeric, and a str() call is cheap insurance.
+    first = str(target.get("first_name") or "").strip()
+    last = str(target.get("last_name") or "").strip()
+    username = str(target.get("username") or "").strip()
     parts = [
         "Generate one personalized DM opener for this recipient.",
         "",

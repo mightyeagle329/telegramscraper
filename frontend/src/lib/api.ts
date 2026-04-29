@@ -1,6 +1,7 @@
 import type {
   Account,
   AIStatus,
+  AnalyticsSummary,
   CampaignArmInput,
   CampaignStats,
   ProxyInput,
@@ -229,4 +230,7 @@ export const api = {
     ),
 
   getAIStatus: () => request<AIStatus>(`/api/campaigns/ai/status`),
+
+  getAnalyticsSummary: (days = 14) =>
+    request<AnalyticsSummary>(`/api/analytics/summary?days=${days}`),
 };

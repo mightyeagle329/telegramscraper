@@ -110,6 +110,66 @@ export interface AIStatus {
   model: string;
 }
 
+export interface AnalyticsTotals {
+  sent: number;
+  skipped: number;
+  errored: number;
+  paused: number;
+  replied: number;
+  reply_rate: number;
+  unique_targets: number;
+}
+
+export interface AnalyticsDailyBucket {
+  date: string;
+  sent: number;
+  skipped: number;
+  errored: number;
+  replied: number;
+}
+
+export interface AnalyticsAccountRow {
+  account_id: string;
+  label: string;
+  status: string;
+  daily_sent: number;
+  daily_limit: number;
+  sent_in_window: number;
+  skipped_in_window: number;
+  replied_in_window: number;
+  reply_rate: number;
+}
+
+export interface AnalyticsCampaignArm {
+  name: string;
+  sent: number;
+  replied: number;
+  reply_rate: number;
+}
+
+export interface AnalyticsCampaignRow {
+  campaign: string;
+  sent: number;
+  replied: number;
+  reply_rate: number;
+  arms: AnalyticsCampaignArm[];
+  winner: string | null;
+}
+
+export interface AnalyticsSkipReason {
+  reason: string;
+  count: number;
+}
+
+export interface AnalyticsSummary {
+  days: number;
+  totals: AnalyticsTotals;
+  daily_volume: AnalyticsDailyBucket[];
+  per_account: AnalyticsAccountRow[];
+  per_campaign: AnalyticsCampaignRow[];
+  skip_reasons: AnalyticsSkipReason[];
+}
+
 /** Per-arm reply rate report from `/api/campaigns/{name}/stats`. */
 export interface CampaignArmStat {
   name: string;

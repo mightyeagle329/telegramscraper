@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import accounts as accounts_mod
 import ai_openers
+import analytics
 import client_pool
 import reply_watcher
 import sender
@@ -662,12 +663,22 @@ def _sheet_rows_to_targets(
             uid_int = int(uid)
         except (TypeError, ValueError):
             continue
+        # gspread returns numeric-looking cells as int/float — coerce every
+        # text field to str so downstream code can safely call .strip() etc.
+        # (e.g. someone whose first_name is "123" arrives as int 123).
+        def _txt(*candidates: object) -> str:
+            for c in candidates:
+                if c is None or c == "":
+                    continue
+                return str(c)
+            return ""
+
         targets.append(
             {
                 "user_id": uid_int,
-                "username": r.get("Username") or r.get("username") or "",
-                "first_name": r.get("First Name") or r.get("first_name") or "",
-                "last_name": r.get("Last Name") or r.get("last_name") or "",
+                "username": _txt(r.get("Username"), r.get("username")),
+                "first_name": _txt(r.get("First Name"), r.get("first_name")),
+                "last_name": _txt(r.get("Last Name"), r.get("last_name")),
             }
         )
 
@@ -831,6 +842,17 @@ async def campaigns_ai_status():
         "configured": ai_openers.is_configured(),
         "model": OPENAI_MODEL,
     }
+
+
+@app.get("/api/analytics/summary")
+async def analytics_summary(days: int = 14):
+    """One-shot performance roll-up for the /analytics page.
+
+    Aggregates sent_log + replies + accounts over the last `days` days and
+    returns totals, a daily volume series, per-account + per-campaign
+    breakdowns, and a skip-reasons histogram.
+    """
+    return analytics.compute_summary(days=days)
 
 
 @app.get("/api/campaigns/{campaign_name}/stats")
