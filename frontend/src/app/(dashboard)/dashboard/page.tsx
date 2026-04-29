@@ -6,6 +6,8 @@ import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n/context";
 import type { Account, ReplyEntry, SentLogEntry } from "@/lib/types";
 
+const REPLIES_PAGE_SIZE = 10;
+
 export default function DashboardHome() {
   const t = useT();
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -14,6 +16,11 @@ export default function DashboardHome() {
   const [queue, setQueue] = useState<Record<string, { pending: number }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // How many reply entries to ask the backend for. Grows by REPLIES_PAGE_SIZE
+  // each "Load more" click. Auto-refresh uses this same number so newly
+  // loaded entries don't snap back to 10 when the interval ticks.
+  const [replyLimit, setReplyLimit] = useState(REPLIES_PAGE_SIZE);
+  const [loadingMoreReplies, setLoadingMoreReplies] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -21,7 +28,9 @@ export default function DashboardHome() {
         api.getAccounts().catch(() => [] as Account[]),
         api.getSentLog({ limit: 10 }).catch(() => [] as SentLogEntry[]),
         api.getQueue().catch(() => ({})),
-        api.getReplies({ limit: 10 }).catch(() => [] as ReplyEntry[]),
+        api
+          .getReplies({ limit: replyLimit })
+          .catch(() => [] as ReplyEntry[]),
       ]);
       setAccounts(a);
       setRecent(r);
@@ -33,13 +42,30 @@ export default function DashboardHome() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [replyLimit]);
 
   useEffect(() => {
     refresh();
     const interval = setInterval(refresh, 15_000);
     return () => clearInterval(interval);
   }, [refresh]);
+
+  // Backend returned fewer than we asked for → we've hit the end of replies.json.
+  const hasMoreReplies = replies.length >= replyLimit;
+
+  async function loadMoreReplies() {
+    setLoadingMoreReplies(true);
+    try {
+      const next = replyLimit + REPLIES_PAGE_SIZE;
+      const rep = await api.getReplies({ limit: next });
+      setReplies(rep);
+      setReplyLimit(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load more");
+    } finally {
+      setLoadingMoreReplies(false);
+    }
+  }
 
   const totals = {
     active: accounts.filter((a) => a.status === "active").length,
@@ -207,6 +233,19 @@ export default function DashboardHome() {
               ))}
           </ul>
         )}
+        {replies.length > 0 && hasMoreReplies ? (
+          <div className="flex justify-center mt-4">
+            <button
+              onClick={loadMoreReplies}
+              disabled={loadingMoreReplies}
+              className="text-xs px-3 py-1.5 border border-card-border rounded-lg text-text-muted hover:text-foreground hover:border-foreground/40 disabled:opacity-50 transition-colors"
+            >
+              {loadingMoreReplies
+                ? "Loading…"
+                : `Load ${REPLIES_PAGE_SIZE} more`}
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="card-elevated p-5">

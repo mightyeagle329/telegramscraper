@@ -9,4 +9,6 @@ python-dotenv==1.0.1
 apscheduler==3.10.4
 pydantic==2.9.2
 python-socks[asyncio]==2.5.1
-openai==1.54.4
+# openai 1.55+ is required: 1.54 passes a deprecated `proxies` kwarg to
+# httpx and crashes on httpx >= 0.28.
+openai==1.78.1
