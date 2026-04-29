@@ -236,13 +236,15 @@ async def distribute_arms_round_robin(
     arms: list[dict],
     delete_after_s: Optional[int] = None,
     campaign: str = "",
+    group_name: str = "",
 ) -> dict[str, dict[str, int]]:
     """Split targets across BOTH accounts and arms round-robin.
 
-    Each `arm` dict carries its own template set:
+    Each `arm` dict carries its own message strategy:
         {
             "name": "A",
-            "primary_templates": ["..."],
+            "primary_templates": ["..."],         # template mode
+            "ai_style": "Friendly, casual...",    # OR AI mode (mutually exclusive)
             "follow_up_after_days": 3,            # optional
             "follow_up_templates": ["..."],       # optional
         }
@@ -251,6 +253,12 @@ async def distribute_arms_round_robin(
     and arm ``arms[i % len(arms)]`` — so with N accounts and M arms, the
     work is spread evenly across all N×M (account, arm) pairs and each
     arm sees roughly the same target count, regardless of N or M.
+
+    For arms in **AI mode** (``ai_style`` set), we pre-generate one
+    custom opener per target via OpenAI BEFORE enqueueing. Each target's
+    queue item gets ``templates: [<that target's opener>]``, so the
+    worker hot path stays template-driven and unchanged. ``group_name``
+    is passed through to the AI as conversation context.
 
     Returns ``{account_id: {arm_name: enqueued_count}}``.
     """
@@ -268,24 +276,81 @@ async def distribute_arms_round_robin(
         ai = i % len(arms)
         buckets[(aid, ai)].append(t)
 
+    # AI mode: pre-generate openers per (arm_index → list[opener]) so each
+    # target gets a unique line. We do this once per arm across ALL its
+    # buckets so a target's opener doesn't depend on which account drew it.
+    # Map: arm_index -> {target_user_id -> opener_text}
+    ai_opener_by_arm: dict[int, dict[int, str]] = {}
+    for ai, arm in enumerate(arms):
+        style = (arm.get("ai_style") or "").strip()
+        if not style:
+            continue
+        # Collect every target across all account buckets for this arm.
+        arm_targets: list[dict] = []
+        for aid in account_ids:
+            arm_targets.extend(buckets[(aid, ai)])
+        if not arm_targets:
+            continue
+        from ai_openers import generate_openers_for_targets
+
+        openers = await generate_openers_for_targets(
+            arm_targets, group_name=group_name, style=style
+        )
+        # Index by user_id for O(1) lookup when we re-walk the buckets.
+        ai_opener_by_arm[ai] = {
+            int(t["user_id"]): openers[i]
+            for i, t in enumerate(arm_targets)
+            if t.get("user_id")
+        }
+
     counts: dict[str, dict[str, int]] = {aid: {} for aid in account_ids}
     for (aid, ai), subset in buckets.items():
         arm = arms[ai]
         arm_name = arm.get("name") or chr(ord("A") + ai)
-        primary_templates = arm.get("primary_templates") or []
-        if not primary_templates or not subset:
+        if not subset:
             counts[aid][arm_name] = 0
             continue
-        counts[aid][arm_name] = await enqueue(
-            aid,
-            subset,
-            primary_templates,
-            delete_after_s,
-            campaign,
-            follow_up_after_days=arm.get("follow_up_after_days"),
-            follow_up_templates=arm.get("follow_up_templates") or [],
-            arm=arm_name,
-        )
+
+        if ai in ai_opener_by_arm:
+            # AI mode — enqueue each target individually with its custom
+            # opener as the (only) template. We can't batch because each
+            # target gets different copy.
+            opener_map = ai_opener_by_arm[ai]
+            total = 0
+            for t in subset:
+                uid = t.get("user_id")
+                if not uid:
+                    continue
+                opener = opener_map.get(int(uid))
+                if not opener:
+                    continue
+                total += await enqueue(
+                    aid,
+                    [t],
+                    [opener],
+                    delete_after_s,
+                    campaign,
+                    follow_up_after_days=arm.get("follow_up_after_days"),
+                    follow_up_templates=arm.get("follow_up_templates") or [],
+                    arm=arm_name,
+                )
+            counts[aid][arm_name] = total
+        else:
+            # Template mode — single enqueue call with the shared template list.
+            primary_templates = arm.get("primary_templates") or []
+            if not primary_templates:
+                counts[aid][arm_name] = 0
+                continue
+            counts[aid][arm_name] = await enqueue(
+                aid,
+                subset,
+                primary_templates,
+                delete_after_s,
+                campaign,
+                follow_up_after_days=arm.get("follow_up_after_days"),
+                follow_up_templates=arm.get("follow_up_templates") or [],
+                arm=arm_name,
+            )
     return counts
 
 

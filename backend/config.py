@@ -28,3 +28,7 @@ MONITOR_INTERVAL = int(os.getenv("MONITOR_INTERVAL", "300"))
 
 # CORS
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+# OpenAI (Phase 2C — AI-generated personalized openers).
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")

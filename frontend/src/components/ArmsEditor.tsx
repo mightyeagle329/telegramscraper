@@ -10,6 +10,15 @@ export interface ArmDraft {
   id: string;
   /** A/B label (e.g. "A", "B", "control"). */
   name: string;
+  /**
+   * "templates": rotate through static `primary_*` variants per send.
+   * "ai":        generate a personalised opener per target via OpenAI
+   *              (uses `aiStyle` instructions). Follow-ups are still
+   *              templated — AI mode only changes the first-touch DM.
+   */
+  mode: "templates" | "ai";
+  /** Free-form style instructions for AI mode (one-liner is fine). */
+  aiStyle: string;
   primarySelectedIds: string[];
   primaryInline: string;
   /** Empty string = no follow-up for this arm. */
@@ -23,6 +32,10 @@ interface Props {
   onChange: (arms: ArmDraft[]) => void;
   libraryTemplates: DbMessageTemplate[];
   supabaseAvailable: boolean;
+  /** Whether the backend has an OpenAI key. Greys out the AI toggle when false. */
+  aiAvailable: boolean;
+  /** Model name to show in the AI panel (e.g. "gpt-4o-mini"). */
+  aiModel: string;
   onSaveInlineToLibrary?: (variants: string[]) => Promise<void>;
 }
 
@@ -43,6 +56,8 @@ export default function ArmsEditor({
   onChange,
   libraryTemplates,
   supabaseAvailable,
+  aiAvailable,
+  aiModel,
   onSaveInlineToLibrary,
 }: Props) {
   const isAB = arms.length > 1;
@@ -56,6 +71,8 @@ export default function ArmsEditor({
     const newArm: ArmDraft = {
       id: cryptoRandomId(),
       name: nextLetter,
+      mode: "templates",
+      aiStyle: "",
       primarySelectedIds: [],
       primaryInline: "",
       followUpDays: "",
@@ -107,6 +124,8 @@ export default function ArmsEditor({
             removable={arms.length > 1}
             libraryTemplates={libraryTemplates}
             supabaseAvailable={supabaseAvailable}
+            aiAvailable={aiAvailable}
+            aiModel={aiModel}
             onSaveInlineToLibrary={onSaveInlineToLibrary}
           />
         ))}
@@ -124,6 +143,8 @@ interface ArmCardProps {
   onRemove: () => void;
   libraryTemplates: DbMessageTemplate[];
   supabaseAvailable: boolean;
+  aiAvailable: boolean;
+  aiModel: string;
   onSaveInlineToLibrary?: (variants: string[]) => Promise<void>;
 }
 
@@ -136,6 +157,8 @@ function ArmCard({
   onRemove,
   libraryTemplates,
   supabaseAvailable,
+  aiAvailable,
+  aiModel,
   onSaveInlineToLibrary,
 }: ArmCardProps) {
   const showFollowup = useMemo(
@@ -186,24 +209,84 @@ function ArmCard({
       </div>
 
       <div>
-        <label className="block text-xs uppercase text-text-muted mb-2">
-          Primary message
-        </label>
-        <TemplatePicker
-          libraryTemplates={libraryTemplates}
-          supabaseAvailable={supabaseAvailable}
-          selectedLibraryIds={arm.primarySelectedIds}
-          onSelectedLibraryIdsChange={(ids) =>
-            onChange({ primarySelectedIds: ids })
-          }
-          inlineText={arm.primaryInline}
-          onInlineTextChange={(s) => onChange({ primaryInline: s })}
-          onSaveInlineToLibrary={onSaveInlineToLibrary}
-          rows={6}
-          placeholder={
-            "Hey {first_name}, saw you in the group...\n---\nHi {first_name}! ..."
-          }
-        />
+        <div className="flex items-center justify-between mb-2 gap-3 flex-wrap">
+          <label className="text-xs uppercase text-text-muted">
+            Primary message
+          </label>
+          <div className="inline-flex border border-card-border rounded-lg overflow-hidden text-xs">
+            <button
+              type="button"
+              onClick={() => onChange({ mode: "templates" })}
+              className={`px-3 py-1 transition-colors ${
+                arm.mode === "templates"
+                  ? "bg-card-border/40 text-foreground"
+                  : "text-text-muted hover:text-foreground"
+              }`}
+            >
+              Templates
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (!aiAvailable) return;
+                onChange({ mode: "ai" });
+              }}
+              disabled={!aiAvailable}
+              title={
+                aiAvailable
+                  ? "Generate a personalized opener per target"
+                  : "Set OPENAI_API_KEY in backend/.env to enable AI mode"
+              }
+              className={`px-3 py-1 transition-colors border-l border-card-border ${
+                arm.mode === "ai"
+                  ? "bg-card-border/40 text-foreground"
+                  : "text-text-muted hover:text-foreground"
+              } disabled:opacity-40 disabled:cursor-not-allowed`}
+            >
+              AI ({aiModel})
+            </button>
+          </div>
+        </div>
+
+        {arm.mode === "templates" ? (
+          <TemplatePicker
+            libraryTemplates={libraryTemplates}
+            supabaseAvailable={supabaseAvailable}
+            selectedLibraryIds={arm.primarySelectedIds}
+            onSelectedLibraryIdsChange={(ids) =>
+              onChange({ primarySelectedIds: ids })
+            }
+            inlineText={arm.primaryInline}
+            onInlineTextChange={(s) => onChange({ primaryInline: s })}
+            onSaveInlineToLibrary={onSaveInlineToLibrary}
+            rows={6}
+            placeholder={
+              "Hey {first_name}, saw you in the group...\n---\nHi {first_name}! ..."
+            }
+          />
+        ) : (
+          <div className="space-y-2">
+            <textarea
+              value={arm.aiStyle}
+              onChange={(e) => onChange({ aiStyle: e.target.value })}
+              rows={6}
+              placeholder={[
+                "Style instructions for GPT — written like you're briefing a copywriter.",
+                "",
+                "Example:",
+                "Friendly and casual. Mention I'm building Telegram outreach automation",
+                "and ask if they'd be open to a 10-min chat. One sentence max, no emojis.",
+              ].join("\n")}
+              className="w-full bg-background border border-card-border rounded-lg px-3 py-2 text-sm font-mono"
+            />
+            <p className="text-xs text-text-muted">
+              Each target gets a unique opener generated at launch time
+              using their first name + the source group as context. Cost
+              is paid up front (~$0.0001 per opener with{" "}
+              <code>{aiModel}</code>) — small but predictable.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="flex items-end gap-3">

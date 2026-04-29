@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import accounts as accounts_mod
+import ai_openers
 import client_pool
 import reply_watcher
 import sender
@@ -727,12 +728,27 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
             detail="Either `arms` or `templates` is required",
         )
 
-    # Validate every arm has at least one primary template.
+    # Validate every arm has either templates OR an ai_style. Mutually
+    # exclusive — set one or the other, not both. If AI mode is requested
+    # but the API key isn't configured, refuse early with a helpful error.
     for a in arms:
-        if not a.get("primary_templates"):
+        has_templates = bool(a.get("primary_templates"))
+        has_ai = bool((a.get("ai_style") or "").strip())
+        if not has_templates and not has_ai:
             raise HTTPException(
                 status_code=400,
-                detail=f"Arm {a.get('name')!r} has no primary_templates",
+                detail=(
+                    f"Arm {a.get('name')!r} needs either primary_templates "
+                    f"or ai_style"
+                ),
+            )
+        if has_ai and not ai_openers.is_configured():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Arm {a.get('name')!r} is in AI mode but OPENAI_API_KEY "
+                    f"is not set on the backend (add it to backend/.env)"
+                ),
             )
 
     try:
@@ -752,18 +768,43 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
             "filtered_out": filtered_out,
             "arms": [a["name"] for a in arms],
         }
-    counts = await sender.distribute_arms_round_robin(
-        targets=targets,
-        account_ids=req.account_ids,
-        arms=arms,
-        delete_after_s=req.delete_after_s,
-        campaign=req.campaign or req.sheet_group_name,
-    )
+    try:
+        counts = await sender.distribute_arms_round_robin(
+            targets=targets,
+            account_ids=req.account_ids,
+            arms=arms,
+            delete_after_s=req.delete_after_s,
+            campaign=req.campaign or req.sheet_group_name,
+            group_name=req.sheet_group_name,
+        )
+    except ai_openers.AIOpenerError as e:
+        # Fail the whole launch if any AI generation fails. Don't ship a
+        # half-personalized batch — the user would get a confusing
+        # campaign with some custom and some default copy.
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI opener generation failed: {e}",
+        )
     return {
         "enqueued": counts,
         "targets_found": len(targets),
         "filtered_out": filtered_out,
         "arms": [a["name"] for a in arms],
+    }
+
+
+@app.get("/api/campaigns/ai/status")
+async def campaigns_ai_status():
+    """Whether AI-mode arms are usable on this backend.
+
+    Frontend uses this to grey out the AI toggle on the arm card and
+    explain why if the key isn't set.
+    """
+    from config import OPENAI_MODEL
+
+    return {
+        "configured": ai_openers.is_configured(),
+        "model": OPENAI_MODEL,
     }
 
 

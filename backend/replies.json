@@ -97,5 +97,32 @@
     "message_id": 28,
     "text": "Just head over to the RichSweeps website, click on the 'Sign Up'button at the top, and follow the quick prompts.\n\nhttps://richsweeps.com/",
     "received_at": "2026-04-29T04:24:55.239310+00:00"
+  },
+  {
+    "account_id": "acc_004",
+    "sender_user_id": 210944655,
+    "sender_username": "combot",
+    "sender_first_name": "Combot",
+    "message_id": 3,
+    "text": "Combot is the most popular Telegram bot for managing your Telegram groups.\nAnalytics, moderation, triggers, levels & XP system, reputation system, reports and many more.",
+    "received_at": "2026-04-29T06:49:59.934612+00:00"
+  },
+  {
+    "account_id": "acc_004",
+    "sender_user_id": 210944655,
+    "sender_username": "combot",
+    "sender_first_name": "Combot",
+    "message_id": 4,
+    "text": "Hello, Emily Johnson!",
+    "received_at": "2026-04-29T06:49:59.956975+00:00"
+  },
+  {
+    "account_id": "acc_004",
+    "sender_user_id": 1388001472,
+    "sender_username": null,
+    "sender_first_name": null,
+    "message_id": 7,
+    "text": "Hey Emily",
+    "received_at": "2026-04-29T06:55:57.802839+00:00"
   }
 ]

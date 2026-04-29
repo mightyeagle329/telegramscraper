@@ -1,5 +1,6 @@
 import type {
   Account,
+  AIStatus,
   CampaignArmInput,
   CampaignStats,
   ProxyInput,
@@ -222,4 +223,6 @@ export const api = {
     request<CampaignStats>(
       `/api/campaigns/${encodeURIComponent(campaignName)}/stats`
     ),
+
+  getAIStatus: () => request<AIStatus>(`/api/campaigns/ai/status`),
 };

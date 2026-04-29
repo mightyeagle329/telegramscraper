@@ -130,16 +130,29 @@ class DistributeRequest(BaseModel):
 
 
 class CampaignArm(BaseModel):
-    """One A/B test arm. Each arm is its own template strategy.
+    """One A/B test arm. Each arm is its own message strategy.
 
     Arms are run in parallel inside one campaign — targets are split evenly
     across arms so we can fairly compare reply rates between strategies.
     Each arm's name (e.g. "A", "B", "control", "gpt-opener") is stamped on
     every send + reply record for reporting.
+
+    Two opener modes per arm:
+      - **Templates mode (default)**: ``primary_templates`` is a list of
+        variants; the worker picks one at random per send.
+      - **AI mode**: ``ai_style`` is set (free-form style instructions).
+        At campaign-launch time we generate ONE custom opener per target
+        via OpenAI and store it as that target's lone template, so the
+        sender hot path is unchanged. ``primary_templates`` is ignored
+        when ``ai_style`` is set.
+
+    Follow-ups always use ``follow_up_templates`` regardless of mode —
+    the AI opener is for first-touch; the nudge stays as templated copy.
     """
 
     name: str
-    primary_templates: list[str]
+    primary_templates: Optional[list[str]] = None
+    ai_style: Optional[str] = None
     follow_up_after_days: Optional[int] = None
     follow_up_templates: Optional[list[str]] = None
 

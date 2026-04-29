@@ -89,12 +89,24 @@ export interface SentLogEntry {
   timestamp: string;
 }
 
-/** One A/B test arm in a campaign request (frontend-built). */
+/** One A/B test arm in a campaign request (frontend-built).
+ *
+ * An arm is in either *templates mode* (provide `primary_templates`) or
+ * *AI mode* (provide `ai_style`). Mutually exclusive — backend rejects
+ * arms that have neither and ignores `primary_templates` when `ai_style`
+ * is set.
+ */
 export interface CampaignArmInput {
   name: string;
-  primary_templates: string[];
+  primary_templates?: string[];
+  ai_style?: string;
   follow_up_after_days?: number | null;
   follow_up_templates?: string[];
+}
+
+export interface AIStatus {
+  configured: boolean;
+  model: string;
 }
 
 /** Per-arm reply rate report from `/api/campaigns/{name}/stats`. */

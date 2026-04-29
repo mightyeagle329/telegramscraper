@@ -41,6 +41,8 @@ function newArm(name: string, primaryInline = ""): ArmDraft {
   return {
     id: makeId(),
     name,
+    mode: "templates",
+    aiStyle: "",
     primarySelectedIds: [],
     primaryInline,
     followUpDays: "",
@@ -58,6 +60,11 @@ export default function CampaignsPage() {
 
   const [library, setLibrary] = useState<DbMessageTemplate[]>([]);
   const supabaseAvailable = isSupabaseConfigured();
+
+  // OpenAI availability — drives whether AI-mode toggle is enabled and
+  // which model name we surface in the UI.
+  const [aiAvailable, setAiAvailable] = useState(false);
+  const [aiModel, setAiModel] = useState("gpt-4o-mini");
 
   const [selectedSheet, setSelectedSheet] = useState("");
   const [selectedAccountIds, setSelectedAccountIds] = useState<string[]>([]);
@@ -117,6 +124,18 @@ export default function CampaignsPage() {
     loadLibrary();
   }, [loadLibrary]);
 
+  useEffect(() => {
+    api
+      .getAIStatus()
+      .then((s) => {
+        setAiAvailable(s.configured);
+        setAiModel(s.model);
+      })
+      .catch(() => {
+        // Backend unreachable or no endpoint — keep AI off; UI greys it out.
+      });
+  }, []);
+
   async function saveInlineToLibrary(variants: string[]) {
     const stamp = new Date().toISOString().slice(0, 16).replace("T", " ");
     for (const body of variants) {
@@ -158,6 +177,35 @@ export default function CampaignsPage() {
       }
       seenNames.add(name.toUpperCase());
 
+      const followDays = a.followUpDays ? Number(a.followUpDays) : NaN;
+      const wantsFollowup = Number.isFinite(followDays) && followDays > 0;
+      const followTemplates = wantsFollowup
+        ? combineForArm(a.followupSelectedIds, a.followupInline)
+        : [];
+
+      if (a.mode === "ai") {
+        const style = a.aiStyle.trim();
+        if (!style) {
+          return {
+            ok: false,
+            error: `Arm "${name}" is in AI mode but has no style instructions. Tell GPT how the opener should sound.`,
+          };
+        }
+        if (!aiAvailable) {
+          return {
+            ok: false,
+            error: `Arm "${name}" is in AI mode but OPENAI_API_KEY isn't set on the backend.`,
+          };
+        }
+        out.push({
+          name,
+          ai_style: style,
+          follow_up_after_days: wantsFollowup ? followDays : null,
+          follow_up_templates: followTemplates,
+        });
+        continue;
+      }
+
       const primary = combineForArm(a.primarySelectedIds, a.primaryInline);
       if (primary.length === 0) {
         return {
@@ -165,12 +213,6 @@ export default function CampaignsPage() {
           error: `Arm "${name}" has no primary template. Add at least one variant.`,
         };
       }
-
-      const followDays = a.followUpDays ? Number(a.followUpDays) : NaN;
-      const wantsFollowup = Number.isFinite(followDays) && followDays > 0;
-      const followTemplates = wantsFollowup
-        ? combineForArm(a.followupSelectedIds, a.followupInline)
-        : [];
 
       out.push({
         name,
@@ -255,6 +297,13 @@ export default function CampaignsPage() {
       // race resolve over time.
       const cName = campaignName || selectedSheet;
       setStatsCampaign(cName);
+      // Clear the per-launch fields (sheet / limit / campaign name) so the
+      // form visibly "resets" without forcing the user to retype arms or
+      // re-select accounts. Re-aim the same A/B at a new audience by just
+      // picking a new sheet.
+      setSelectedSheet("");
+      setLimit("");
+      setCampaignName("");
       await refresh();
     } catch (e) {
       setMessage({
@@ -491,6 +540,8 @@ export default function CampaignsPage() {
                 onChange={setArms}
                 libraryTemplates={library}
                 supabaseAvailable={supabaseAvailable}
+                aiAvailable={aiAvailable}
+                aiModel={aiModel}
                 onSaveInlineToLibrary={saveInlineToLibrary}
               />
               <p className="text-xs text-text-muted mt-3">
