@@ -128,13 +128,27 @@ function Stat({
 }
 
 function DailyVolumeChart({ summary }: { summary: AnalyticsSummary }) {
-  const max = useMemo(
-    () => Math.max(1, ...summary.daily_volume.map((d) => d.sent)),
-    [summary]
+  // Max must include all three series — otherwise a day with skipped >> sent
+  // produces bar heights >100% that overflow the chart box. Round up to a
+  // nicer y-axis tick so the top of the chart isn't cramped against the
+  // tallest bar.
+  const max = useMemo(() => {
+    const peak = Math.max(
+      0,
+      ...summary.daily_volume.map((d) =>
+        Math.max(d.sent, d.skipped, d.replied)
+      )
+    );
+    return Math.max(1, niceCeil(peak));
+  }, [summary]);
+
+  const empty = summary.daily_volume.every(
+    (d) => d.sent === 0 && d.skipped === 0 && d.replied === 0
   );
+
   return (
     <section className="card-elevated p-5">
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <h2 className="text-lg font-semibold">Daily volume</h2>
         <div className="flex items-center gap-3 text-xs text-text-muted">
           <LegendChip color="bg-accent-green" label="sent" />
@@ -142,46 +156,101 @@ function DailyVolumeChart({ summary }: { summary: AnalyticsSummary }) {
           <LegendChip color="bg-text-muted/40" label="skipped" />
         </div>
       </div>
-      {summary.daily_volume.every((d) => d.sent === 0 && d.skipped === 0) ? (
+      {empty ? (
         <p className="text-text-muted text-sm">
           No activity in this window yet.
         </p>
       ) : (
-        <div className="flex items-end gap-1 h-44">
-          {summary.daily_volume.map((d) => {
-            const sentH = (d.sent / max) * 100;
-            const skipH = (d.skipped / max) * 100;
-            const replyH = (d.replied / max) * 100;
-            return (
-              <div
-                key={d.date}
-                className="flex-1 flex flex-col items-center gap-1 group"
-                title={`${d.date}\n${d.sent} sent · ${d.replied} replied · ${d.skipped} skipped`}
-              >
-                <div className="w-full flex items-end justify-center gap-0.5 h-36">
-                  <div
-                    className="w-2 bg-accent-green rounded-t"
-                    style={{ height: `${sentH}%` }}
-                  />
-                  <div
-                    className="w-2 bg-accent-blue rounded-t"
-                    style={{ height: `${replyH}%` }}
-                  />
-                  <div
-                    className="w-2 bg-text-muted/40 rounded-t"
-                    style={{ height: `${skipH}%` }}
-                  />
-                </div>
-                <div className="text-[10px] text-text-muted whitespace-nowrap">
-                  {d.date.slice(5)}
-                </div>
-              </div>
-            );
-          })}
+        // Two-column grid: a small y-axis on the left, the chart on the right.
+        // The chart wrapper is overflow-x-auto so 30-day windows don't squish
+        // the bars on narrow viewports — they just scroll.
+        <div className="grid grid-cols-[auto_1fr] gap-3">
+          <YAxis max={max} />
+          <div className="overflow-x-auto -mr-1 pr-1">
+            <div
+              className="inline-flex items-end gap-1.5"
+              style={{ minWidth: "100%" }}
+            >
+              {summary.daily_volume.map((d) => (
+                <DayColumn key={d.date} d={d} max={max} />
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </section>
   );
+}
+
+const CHART_BARS_HEIGHT_PX = 160;
+
+function YAxis({ max }: { max: number }) {
+  // Three labels at the top, mid, and bottom of the bars area. Aligned to
+  // the bars container's exact pixel height so gridlines line up.
+  return (
+    <div
+      className="flex flex-col justify-between text-[10px] text-text-muted text-right pr-1 pb-[18px]"
+      style={{ height: CHART_BARS_HEIGHT_PX }}
+    >
+      <span>{max}</span>
+      <span>{Math.round(max / 2)}</span>
+      <span>0</span>
+    </div>
+  );
+}
+
+function DayColumn({
+  d,
+  max,
+}: {
+  d: AnalyticsSummary["daily_volume"][number];
+  max: number;
+}) {
+  const sentH = Math.round((d.sent / max) * CHART_BARS_HEIGHT_PX);
+  const replyH = Math.round((d.replied / max) * CHART_BARS_HEIGHT_PX);
+  const skipH = Math.round((d.skipped / max) * CHART_BARS_HEIGHT_PX);
+  return (
+    <div
+      className="flex flex-col items-center"
+      title={`${d.date}\n${d.sent} sent · ${d.replied} replied · ${d.skipped} skipped`}
+    >
+      <div
+        className="flex items-end justify-center gap-0.5"
+        style={{ height: CHART_BARS_HEIGHT_PX }}
+      >
+        <div
+          className="w-2 bg-accent-green rounded-t"
+          style={{ height: sentH }}
+        />
+        <div
+          className="w-2 bg-accent-blue rounded-t"
+          style={{ height: replyH }}
+        />
+        <div
+          className="w-2 bg-text-muted/40 rounded-t"
+          style={{ height: skipH }}
+        />
+      </div>
+      <div className="text-[10px] text-text-muted mt-1.5 whitespace-nowrap">
+        {d.date.slice(5)}
+      </div>
+    </div>
+  );
+}
+
+/** Round `n` up to a "nice" y-axis ceiling — 1, 2, 5, 10, 20, 50, 100 etc.
+ *  so the top of the chart sits a touch above the tallest bar instead of
+ *  exactly clipping it. */
+function niceCeil(n: number): number {
+  if (n <= 0) return 1;
+  const exp = Math.pow(10, Math.floor(Math.log10(n)));
+  const f = n / exp;
+  let nice;
+  if (f <= 1) nice = 1;
+  else if (f <= 2) nice = 2;
+  else if (f <= 5) nice = 5;
+  else nice = 10;
+  return nice * exp;
 }
 
 function LegendChip({ color, label }: { color: string; label: string }) {
