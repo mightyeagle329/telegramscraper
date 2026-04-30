@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/context";
+import Logo from "@/components/Logo";
 
 export default function LoginPage() {
   return (
@@ -96,13 +97,12 @@ function AuthShell({
   subtitle?: string;
   children: React.ReactNode;
 }) {
-  const t = useT();
   return (
     <div className="min-h-screen flex items-center justify-center px-4 md:px-6 bg-background">
       <div className="w-full max-w-sm">
-        <div className="mb-6 text-center">
-          <Link href="/" className="font-bold text-xl">
-            {t("app.name")}
+        <div className="mb-6 flex justify-center">
+          <Link href="/" aria-label="Outpilot home">
+            <Logo size={32} withWordmark />
           </Link>
         </div>
         <div className="card-elevated p-5 md:p-6">

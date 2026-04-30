@@ -45,7 +45,10 @@ export default function DashboardNav({ email, initial, localDev }: Props) {
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
-      router.push("/login");
+      // Send the user to the public landing on logout, not back to /login —
+      // the marketing page is the natural "logged out" destination.
+      router.push("/");
+      router.refresh();
       router.refresh();
     } finally {
       setSigningOut(false);
