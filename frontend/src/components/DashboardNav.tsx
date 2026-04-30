@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useT } from "@/lib/i18n/context";
 import LanguageToggle from "./LanguageToggle";
+import Logo from "./Logo";
 import StatusBar from "./StatusBar";
 import ThemeToggle from "./ThemeToggle";
 
@@ -60,8 +61,8 @@ export default function DashboardNav({ email, initial, localDev }: Props) {
   return (
     <header className="border-b border-card-border bg-card-bg/80 backdrop-blur-md sticky top-0 z-20">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-3 flex items-center justify-between gap-3 md:gap-6">
-        <Link href="/dashboard" className="font-bold text-lg md:text-xl shrink-0">
-          Telegram Outreach
+        <Link href="/dashboard" className="shrink-0">
+          <Logo size={26} withWordmark />
         </Link>
 
         {/* Desktop nav */}
