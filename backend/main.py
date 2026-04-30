@@ -784,9 +784,18 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         filter_bots=req.filter_bots,
     )
 
+    # Drop targets without a public @username. Cold DMs to user_id-only
+    # peers always fail with PeerIdInvalidError — filtering up front saves
+    # AI opener cost and queue churn.
+    no_username_out = 0
+    if req.require_username and targets:
+        before = len(targets)
+        targets = [t for t in targets if (t.get("username") or "").strip()]
+        no_username_out = before - len(targets)
+
     # Global dedupe — drop anyone we've already DM'd from any account.
-    # Done AFTER sheet parsing + bot filter but BEFORE distribution so the
-    # `enqueued` counts reflect only fresh contacts.
+    # Done AFTER sheet parsing + bot filter + username filter but BEFORE
+    # distribution so the `enqueued` counts reflect only fresh contacts.
     deduped_out = 0
     if req.dedupe_already_contacted and targets:
         already = sender.get_contacted_user_ids()
@@ -800,6 +809,7 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
             "enqueued": {aid: {a["name"]: 0 for a in arms} for aid in req.account_ids},
             "targets_found": 0,
             "filtered_out": filtered_out,
+            "no_username_out": no_username_out,
             "deduped_out": deduped_out,
             "arms": [a["name"] for a in arms],
         }
@@ -824,6 +834,7 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         "enqueued": counts,
         "targets_found": len(targets),
         "filtered_out": filtered_out,
+        "no_username_out": no_username_out,
         "deduped_out": deduped_out,
         "arms": [a["name"] for a in arms],
     }

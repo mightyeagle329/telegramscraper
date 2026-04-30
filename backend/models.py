@@ -188,6 +188,15 @@ class CampaignFromSheetRequest(BaseModel):
     # you specifically want to re-target a previously-DM'd cohort (e.g.
     # testing a new arm against an audience that already heard arm A).
     dedupe_already_contacted: bool = True
+    # Drop targets that don't have a public @username. Telegram's MTProto
+    # cannot resolve a cold DM to a user_id alone (PeerIdInvalidError) —
+    # the sender needs an @username to look up the recipient's access_hash.
+    # Without one, the queue item is guaranteed to skip at send time AND,
+    # in AI mode, we'd waste an OpenAI call generating a personalised line
+    # for someone we'll never reach. Defaults True; set False only if you
+    # have an explicit reason (e.g. you've previously interacted with the
+    # user from this account so Telethon has them cached).
+    require_username: bool = True
 
     # === A/B testing ===
     # Phase 2B: define one or more `arms`, each with its own template set

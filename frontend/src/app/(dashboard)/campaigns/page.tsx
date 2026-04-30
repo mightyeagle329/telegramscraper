@@ -54,6 +54,7 @@ export default function CampaignsPage() {
   const [shuffle, setShuffle] = useState(true);
   const [filterBots, setFilterBots] = useState(true);
   const [dedupeContacted, setDedupeContacted] = useState(true);
+  const [requireUsername, setRequireUsername] = useState(true);
 
   const [enqueueing, setEnqueueing] = useState(false);
   const [message, setMessage] = useState<
@@ -275,6 +276,7 @@ export default function CampaignsPage() {
         shuffle,
         filter_bots: filterBots,
         dedupe_already_contacted: dedupeContacted,
+        require_username: requireUsername,
       });
       const totalEnqueued = Object.values(result.enqueued).reduce(
         (s, perArm) => s + Object.values(perArm).reduce((x, n) => x + n, 0),
@@ -292,6 +294,10 @@ export default function CampaignsPage() {
               result.deduped_out === 1 ? "" : "s"
             }`
           : "";
+      const noUsernameNote =
+        result.no_username_out > 0
+          ? ` · skipped ${result.no_username_out} without @username`
+          : "";
       const armsNote =
         built.arms.length > 1
           ? ` across ${built.arms.length} arms (${built.arms
@@ -302,7 +308,7 @@ export default function CampaignsPage() {
         kind: "ok",
         text: `Queued ${totalEnqueued} DMs across ${
           Object.keys(result.enqueued).length
-        } accounts${armsNote} (from ${result.targets_found} sheet rows)${filteredNote}${dedupeNote}.`,
+        } accounts${armsNote} (from ${result.targets_found} sheet rows)${filteredNote}${noUsernameNote}${dedupeNote}.`,
       });
       // Pre-load stats for this campaign so the user can watch the A/B
       // race resolve over time.
@@ -556,6 +562,20 @@ export default function CampaignsPage() {
                   (recommended — prevents accidentally double-messaging the
                   same person across campaigns or sender accounts). Uncheck
                   to deliberately re-target a previously-contacted cohort.
+                </span>
+              </label>
+
+              <label className="flex items-center gap-2 text-xs text-text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={requireUsername}
+                  onChange={(e) => setRequireUsername(e.target.checked)}
+                />
+                <span>
+                  Only send to users with a public @username (recommended —
+                  Telegram can&apos;t cold-DM users without a username, so
+                  these always fail at send time and waste AI generation
+                  cost).
                 </span>
               </label>
             </div>

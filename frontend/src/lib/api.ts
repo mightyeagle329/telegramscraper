@@ -201,6 +201,9 @@ export const api = {
     // Drop targets we've already DM'd from any account (global dedupe).
     // Defaults true on the backend if omitted.
     dedupe_already_contacted?: boolean;
+    // Drop targets without a public @username (Telegram can't cold-DM
+    // them by user_id alone). Defaults true on the backend.
+    require_username?: boolean;
     // Multi-arm A/B form (preferred). Each arm carries its own templates +
     // optional follow-up config; targets are split round-robin across arms.
     arms?: CampaignArmInput[];
@@ -217,6 +220,7 @@ export const api = {
       enqueued: Record<string, Record<string, number>>;
       targets_found: number;
       filtered_out: number;
+      no_username_out: number;
       deduped_out: number;
       arms?: string[];
     }>(`/api/campaigns/enqueue-from-sheet`, {
