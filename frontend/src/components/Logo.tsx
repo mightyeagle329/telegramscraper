@@ -1,13 +1,19 @@
 import Image from "next/image";
 
 /**
- * Outpilot logo — uses the PNG mark from /public/logo.png next to a
- * wordmark when requested. Single source of truth: swap the file at
- * public/logo.png to refresh every site usage at once.
+ * Outpilot logo — uses the symbol-only mark from /public/logo-mark.png
+ * (single-colour green silhouette on transparent) next to an optional
+ * wordmark.
  *
- * The source PNG is 1536x1024 (3:2 aspect, with built-in padding around
- * the icon), so we render it at the requested HEIGHT and let width scale
- * proportionally — keeps it crisp on retina without distorting the mark.
+ * Why /logo-mark.png and not /logo.png?
+ *   /logo.png is the stamped "app icon" badge (green plate + white
+ *   reticle). It looks great as a favicon but reads as a sticker on
+ *   inline web headers, especially in dark mode. /logo-mark.png is the
+ *   same symbol re-rendered as a flat single-colour mark on transparent —
+ *   modern web brand pattern (Linear/Stripe/Vercel) that adapts cleanly
+ *   to any background.
+ *
+ * Swap public/logo-mark.png to update every inline usage at once.
  */
 interface Props {
   /** Pixel height of the icon mark. Width auto-scales from PNG aspect. */
@@ -18,25 +24,23 @@ interface Props {
   wordmarkClassName?: string;
 }
 
-const ASPECT = 1536 / 1024;
-
+// Source PNG is 1254x1254 (square), so the rendered mark is a square block
+// matching `size` exactly.
 export default function Logo({
   size = 28,
   withWordmark = false,
   wordmarkClassName = "text-foreground",
 }: Props) {
-  const height = size;
-  const width = Math.round(height * ASPECT);
   return (
     <span className="inline-flex items-center gap-2">
       <Image
-        src="/logo.png"
+        src="/logo-mark.png"
         alt="Outpilot"
-        width={width}
-        height={height}
+        width={size}
+        height={size}
         priority
-        sizes={`${width}px`}
-        style={{ height, width: "auto" }}
+        sizes={`${size}px`}
+        style={{ height: size, width: size }}
       />
       {withWordmark ? (
         <span
