@@ -234,7 +234,7 @@ export default function DashboardHome() {
             follow-up to that contact is auto-cancelled.
           </p>
         ) : (
-          <ul className="space-y-2 text-sm">
+          <ul className="space-y-2 text-sm max-h-96 overflow-y-auto pr-1">
             {replies
               .slice()
               .reverse()
