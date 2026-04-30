@@ -6,7 +6,7 @@ import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n/context";
 import type { Account, ReplyEntry, SentLogEntry } from "@/lib/types";
 
-const REPLIES_PAGE_SIZE = 10;
+const PAGE_SIZE = 10;
 
 export default function DashboardHome() {
   const t = useT();
@@ -16,17 +16,21 @@ export default function DashboardHome() {
   const [queue, setQueue] = useState<Record<string, { pending: number }>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // How many reply entries to ask the backend for. Grows by REPLIES_PAGE_SIZE
-  // each "Load more" click. Auto-refresh uses this same number so newly
-  // loaded entries don't snap back to 10 when the interval ticks.
-  const [replyLimit, setReplyLimit] = useState(REPLIES_PAGE_SIZE);
+  // Limits grow by PAGE_SIZE on each "Load more" click. Auto-refresh uses
+  // these same numbers so newly loaded entries don't snap back to 10 on
+  // the next interval tick.
+  const [replyLimit, setReplyLimit] = useState(PAGE_SIZE);
+  const [recentLimit, setRecentLimit] = useState(PAGE_SIZE);
   const [loadingMoreReplies, setLoadingMoreReplies] = useState(false);
+  const [loadingMoreRecent, setLoadingMoreRecent] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
       const [a, r, q, rep] = await Promise.all([
         api.getAccounts().catch(() => [] as Account[]),
-        api.getSentLog({ limit: 10 }).catch(() => [] as SentLogEntry[]),
+        api
+          .getSentLog({ limit: recentLimit })
+          .catch(() => [] as SentLogEntry[]),
         api.getQueue().catch(() => ({})),
         api
           .getReplies({ limit: replyLimit })
@@ -42,7 +46,7 @@ export default function DashboardHome() {
     } finally {
       setLoading(false);
     }
-  }, [replyLimit]);
+  }, [replyLimit, recentLimit]);
 
   useEffect(() => {
     refresh();
@@ -50,13 +54,14 @@ export default function DashboardHome() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  // Backend returned fewer than we asked for → we've hit the end of replies.json.
+  // Backend returned fewer than asked for → we've hit the end of the file.
   const hasMoreReplies = replies.length >= replyLimit;
+  const hasMoreRecent = recent.length >= recentLimit;
 
   async function loadMoreReplies() {
     setLoadingMoreReplies(true);
     try {
-      const next = replyLimit + REPLIES_PAGE_SIZE;
+      const next = replyLimit + PAGE_SIZE;
       const rep = await api.getReplies({ limit: next });
       setReplies(rep);
       setReplyLimit(next);
@@ -64,6 +69,20 @@ export default function DashboardHome() {
       setError(e instanceof Error ? e.message : "Failed to load more");
     } finally {
       setLoadingMoreReplies(false);
+    }
+  }
+
+  async function loadMoreRecent() {
+    setLoadingMoreRecent(true);
+    try {
+      const next = recentLimit + PAGE_SIZE;
+      const r = await api.getSentLog({ limit: next });
+      setRecent(r);
+      setRecentLimit(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load more");
+    } finally {
+      setLoadingMoreRecent(false);
     }
   }
 
@@ -185,6 +204,17 @@ export default function DashboardHome() {
                 ))}
             </ul>
           )}
+          {recent.length > 0 && hasMoreRecent ? (
+            <div className="flex justify-center mt-3">
+              <button
+                onClick={loadMoreRecent}
+                disabled={loadingMoreRecent}
+                className="text-xs px-3 py-1.5 border border-card-border rounded-lg text-text-muted hover:text-foreground hover:border-foreground/40 disabled:opacity-50 transition-colors"
+              >
+                {loadingMoreRecent ? "Loading…" : `Load ${PAGE_SIZE} more`}
+              </button>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -242,7 +272,7 @@ export default function DashboardHome() {
             >
               {loadingMoreReplies
                 ? "Loading…"
-                : `Load ${REPLIES_PAGE_SIZE} more`}
+                : `Load ${PAGE_SIZE} more`}
             </button>
           </div>
         ) : null}
