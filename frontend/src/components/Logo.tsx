@@ -1,55 +1,43 @@
+import Image from "next/image";
+
 /**
- * Outpilot logo — placeholder while the final mark is being designed.
+ * Outpilot logo — uses the PNG mark from /public/logo.png next to a
+ * wordmark when requested. Single source of truth: swap the file at
+ * public/logo.png to refresh every site usage at once.
  *
- * The mark is a rounded square containing a north-east chevron, suggesting
- * outbound motion / outreach. Single accent colour means it works on dark
- * and light backgrounds and reads cleanly at favicon size (16-32px).
- *
- * Swap this file's SVG out when the final logo lands; the export shape +
- * usage sites stay the same.
+ * The source PNG is 1536x1024 (3:2 aspect, with built-in padding around
+ * the icon), so we render it at the requested HEIGHT and let width scale
+ * proportionally — keeps it crisp on retina without distorting the mark.
  */
 interface Props {
-  /** Pixel size of the icon mark (height = width). Defaults to 28. */
+  /** Pixel height of the icon mark. Width auto-scales from PNG aspect. */
   size?: number;
-  /** Show the wordmark next to the icon. Use on landing/header, not favicon. */
+  /** Show the "Outpilot" wordmark next to the icon. */
   withWordmark?: boolean;
-  /** Tailwind class for the icon fill colour (defaults to accent-green). */
-  iconClassName?: string;
-  /** Tailwind class for the wordmark colour (defaults to foreground). */
+  /** Tailwind class for the wordmark colour. */
   wordmarkClassName?: string;
 }
+
+const ASPECT = 1536 / 1024;
 
 export default function Logo({
   size = 28,
   withWordmark = false,
-  iconClassName = "text-accent-green",
   wordmarkClassName = "text-foreground",
 }: Props) {
+  const height = size;
+  const width = Math.round(height * ASPECT);
   return (
     <span className="inline-flex items-center gap-2">
-      <svg
-        viewBox="0 0 32 32"
-        width={size}
-        height={size}
-        aria-hidden="true"
-        className={iconClassName}
-      >
-        <rect width="32" height="32" rx="7" fill="currentColor" />
-        <path
-          d="M10.5 21.5 L21.5 10.5"
-          stroke="white"
-          strokeWidth="2.6"
-          strokeLinecap="round"
-        />
-        <path
-          d="M14.5 10.5 L21.5 10.5 L21.5 17.5"
-          stroke="white"
-          strokeWidth="2.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          fill="none"
-        />
-      </svg>
+      <Image
+        src="/logo.png"
+        alt="Outpilot"
+        width={width}
+        height={height}
+        priority
+        sizes={`${width}px`}
+        style={{ height, width: "auto" }}
+      />
       {withWordmark ? (
         <span
           className={`text-lg md:text-xl font-bold tracking-tight ${wordmarkClassName}`}
