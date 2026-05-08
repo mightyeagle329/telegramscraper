@@ -103,11 +103,77 @@ export interface CampaignArmInput {
   follow_up_after_days?: number | null;
   follow_up_templates?: string[];
   follow_up_ai_style?: string;
+  ai_model?: string;
+  ai_two_stage?: boolean;
 }
 
 export interface AIStatus {
   configured: boolean;
   model: string;
+}
+
+export interface BotStatus {
+  configured: boolean;
+  missing?: string[];
+  bot_username?: string;
+  bot_name?: string;
+  chat_id?: string;
+  sheet_id?: string;
+  tab?: string;
+  error?: string;
+}
+
+export interface BotQueueRow {
+  row: number;
+  id: string;
+  content: string;
+  scheduled_at: string;
+  type: string;
+  image_url: string;
+  chat_id: string;
+  posted_at: string;
+  status: string;
+}
+
+export interface BotHistoryEntry {
+  id: string;
+  row: number;
+  content: string;
+  type: string;
+  chat_id: string;
+  telegram_message_id?: number | null;
+  posted_at: string;
+  manual: boolean;
+}
+
+export interface BotWriterConfig {
+  enabled: boolean;
+  posts_per_batch: number;
+  active_start_hour_utc: number;
+  active_end_hour_utc: number;
+  content_mix: Record<string, number>;
+  brand_context: string;
+  model: string;
+}
+
+export interface BotWriterPreviewRow {
+  type: string;
+  content: string;
+  scheduled_at: string;
+}
+
+export interface BotWriterPreview {
+  rows?: BotWriterPreviewRow[];
+  count?: number;
+  error?: string;
+}
+
+export interface BotWriterRunResult {
+  generated?: number;
+  appended?: number;
+  first_scheduled_at?: string | null;
+  last_scheduled_at?: string | null;
+  skipped?: string;
 }
 
 export interface AnalyticsTotals {
@@ -117,6 +183,9 @@ export interface AnalyticsTotals {
   paused: number;
   replied: number;
   reply_rate: number;
+  joined: number;
+  attributed_joined: number;
+  join_rate: number;
   unique_targets: number;
 }
 
@@ -126,6 +195,7 @@ export interface AnalyticsDailyBucket {
   skipped: number;
   errored: number;
   replied: number;
+  joined: number;
 }
 
 export interface AnalyticsAccountRow {
@@ -137,23 +207,64 @@ export interface AnalyticsAccountRow {
   sent_in_window: number;
   skipped_in_window: number;
   replied_in_window: number;
+  joined_in_window: number;
   reply_rate: number;
+  join_rate: number;
 }
 
 export interface AnalyticsCampaignArm {
   name: string;
   sent: number;
   replied: number;
+  joined: number;
   reply_rate: number;
+  join_rate: number;
 }
 
 export interface AnalyticsCampaignRow {
   campaign: string;
   sent: number;
   replied: number;
+  joined: number;
   reply_rate: number;
+  join_rate: number;
   arms: AnalyticsCampaignArm[];
   winner: string | null;
+  join_winner: string | null;
+}
+
+export interface TrackedGroup {
+  group_id: number;
+  url: string;
+  name: string;
+  last_polled_at: string | null;
+  interval_s: number;
+  added_at: string | null;
+  members_known: number;
+}
+
+export interface JoinEvent {
+  user_id: number;
+  group_id: number;
+  group_name: string;
+  joined_at: string;
+  source_account: string | null;
+  source_campaign: string | null;
+  source_arm: string | null;
+  attributed: boolean;
+}
+
+export interface GroupScorecard {
+  name: string;
+  members: number;
+  reachable_pct: number;
+  sent: number;
+  replied: number;
+  joined: number;
+  reply_rate: number;
+  join_rate: number;
+  tier: "T1" | "T2" | "T3";
+  campaigns: string[];
 }
 
 export interface AnalyticsSkipReason {
@@ -170,20 +281,24 @@ export interface AnalyticsSummary {
   skip_reasons: AnalyticsSkipReason[];
 }
 
-/** Per-arm reply rate report from `/api/campaigns/{name}/stats`. */
+/** Per-arm reply rate + join rate report from `/api/campaigns/{name}/stats`. */
 export interface CampaignArmStat {
   name: string;
   sent: number;
   replied: number;
+  joined: number;
   reply_rate: number;
+  join_rate: number;
 }
 
 export interface CampaignStats {
   campaign: string;
   arms: CampaignArmStat[];
   winner: string | null;
+  join_winner: string | null;
   total_sent: number;
   total_replied: number;
+  total_joined: number;
 }
 
 export interface ReplyEntry {

@@ -4,13 +4,18 @@
 # container host (Railway, Render, DigitalOcean droplet, bare Docker).
 #
 # Persistent state lives under /data (mounted volume on Fly):
-#   - /data/session.session         scraper account Telethon session
-#   - /data/sessions/acc_*.session  Phase 1 sender sessions
-#   - /data/accounts.json           account registry (until migrated to Supabase)
-#   - /data/queue.json              send queue
-#   - /data/sent_log.json           send audit log
-#   - /data/groups.json             tracked groups
-#   - /data/warmup_groups.json      warm-up group list
+#   - /data/session.session           scraper account Telethon session
+#   - /data/sessions/acc_*.session    Phase 1 sender sessions
+#   - /data/accounts.json             account registry
+#   - /data/queue.json                send queue
+#   - /data/sent_log.json             send audit log
+#   - /data/groups.json               scraped source groups
+#   - /data/warmup_groups.json        warm-up group list
+#   - /data/replies.json              Phase 2A reply audit log
+#   - /data/contacted.json            Phase 2 global dedup set
+#   - /data/tracked_groups.json       Phase 3 funnel destinations
+#   - /data/joins.json                Phase 3 join events
+#   - /data/bot_history.json          Phase 3 engagement-bot post audit log
 
 FROM python:3.12-slim AS base
 
@@ -47,7 +52,7 @@ if [ -n "${GOOGLE_TOKEN_B64:-}" ]; then\n\
 fi\n\
 # Symlink persistent paths into the app dir so the existing Python code\n\
 # (which uses relative paths) finds them without any code changes.\n\
-for f in session.session session.session-journal accounts.json queue.json sent_log.json groups.json warmup_groups.json credentials.json token.json; do\n\
+for f in session.session session.session-journal accounts.json queue.json sent_log.json groups.json warmup_groups.json replies.json contacted.json tracked_groups.json joins.json bot_history.json credentials.json token.json; do\n\
   [ -e "/data/$f" ] && ln -sf "/data/$f" "/app/$f" || true\n\
 done\n\
 ln -sfn /data/sessions /app/sessions\n\

@@ -2,14 +2,23 @@ import type {
   Account,
   AIStatus,
   AnalyticsSummary,
+  BotHistoryEntry,
+  BotQueueRow,
+  BotStatus,
+  BotWriterConfig,
+  BotWriterPreview,
+  BotWriterRunResult,
   CampaignArmInput,
   CampaignStats,
+  GroupScorecard,
+  JoinEvent,
   ProxyInput,
   QueueSnapshotEntry,
   ReplyEntry,
   SentLogEntry,
   SignupStartResponse,
   SignupStepResponse,
+  TrackedGroup,
   WorkerStatus,
 } from "./types";
 
@@ -237,4 +246,104 @@ export const api = {
 
   getAnalyticsSummary: (days = 14) =>
     request<AnalyticsSummary>(`/api/analytics/summary?days=${days}`),
+
+  // -------- Phase 3: Funnel — tracked groups + joins + scorecards --------
+  listTrackedGroups: () => request<TrackedGroup[]>(`/api/tracked-groups`),
+  addTrackedGroup: (url: string, interval_s?: number) =>
+    request<TrackedGroup>(`/api/tracked-groups`, {
+      method: "POST",
+      body: JSON.stringify({ url, interval_s }),
+    }),
+  removeTrackedGroup: (id: string) =>
+    request<{ removed: boolean }>(`/api/tracked-groups/${id}`, { method: "DELETE" }),
+  pollTrackedGroup: (id: string) =>
+    request<{ joined: number; left: number; total_members: number }>(
+      `/api/tracked-groups/${id}/poll`,
+      { method: "POST" }
+    ),
+  pollAllTrackedGroups: () =>
+    request<{ results: any[] }>(`/api/tracked-groups/poll-all`, { method: "POST" }),
+  getJoins: (params?: { limit?: number; group_id?: number; campaign?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.group_id) q.set("group_id", String(params.group_id));
+    if (params?.campaign) q.set("campaign", params.campaign);
+    const qs = q.toString();
+    return request<JoinEvent[]>(`/api/joins${qs ? `?${qs}` : ""}`);
+  },
+  getGroupScorecards: () =>
+    request<GroupScorecard[]>(`/api/groups/scorecards`),
+
+  // -------- Phase 3: Engagement bot (Sheet → Telegram broadcaster) --------
+  getBotStatus: () => request<BotStatus>(`/api/bot/status`),
+  getBotQueue: () => request<BotQueueRow[]>(`/api/bot/queue`),
+  getBotHistory: (limit = 50) =>
+    request<BotHistoryEntry[]>(`/api/bot/history?limit=${limit}`),
+  botPostNow: (rowIdx: number) =>
+    request<{ ok: boolean; status?: string; row: number; message_id?: number }>(
+      `/api/bot/post-now/${rowIdx}`,
+      { method: "POST" }
+    ),
+  botRunCycle: () =>
+    request<{ posted: number; errors: number; considered: number }>(
+      `/api/bot/run-cycle`,
+      { method: "POST" }
+    ),
+
+  // -------- Phase 3: AI engagement writer (auto-generates bot posts) --------
+  getBotWriterConfig: () => request<BotWriterConfig>(`/api/bot/writer/config`),
+  updateBotWriterConfig: (patch: Partial<BotWriterConfig>) =>
+    request<BotWriterConfig>(`/api/bot/writer/config`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  previewBotWriter: () =>
+    request<BotWriterPreview>(`/api/bot/writer/preview`, { method: "POST" }),
+  runBotWriterNow: () =>
+    request<BotWriterRunResult>(`/api/bot/writer/run-now`, { method: "POST" }),
+
+  // -------- Phase 3 VA workflow: post CRUD --------
+  addBotPost: (body: {
+    content: string;
+    scheduled_at: string;
+    type?: string;
+    image_url?: string;
+    status?: string;
+  }) =>
+    request<BotQueueRow>(`/api/bot/post`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  bulkBotPosts: (body: {
+    items: { content: string; type?: string; image_url?: string }[];
+    spread_days?: number;
+    posts_per_day?: number;
+    pending_review?: boolean;
+  }) =>
+    request<{ added: number; rows: BotQueueRow[] }>(`/api/bot/posts/bulk`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  updateBotPost: (
+    rowIdx: number,
+    patch: {
+      content?: string;
+      scheduled_at?: string;
+      type?: string;
+      image_url?: string;
+      status?: string;
+    }
+  ) =>
+    request<BotQueueRow>(`/api/bot/post/${rowIdx}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deleteBotPost: (rowIdx: number) =>
+    request<{ deleted: boolean }>(`/api/bot/post/${rowIdx}`, {
+      method: "DELETE",
+    }),
+  approveBotPost: (rowIdx: number) =>
+    request<BotQueueRow>(`/api/bot/post/${rowIdx}/approve`, {
+      method: "POST",
+    }),
 };

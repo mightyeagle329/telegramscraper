@@ -18,6 +18,7 @@ const linkSpecs: { href: string; key: string }[] = [
   { href: "/templates", key: "nav.templates" },
   { href: "/campaigns", key: "nav.campaigns" },
   { href: "/analytics", key: "nav.analytics" },
+  { href: "/bot", key: "nav.bot" },
 ];
 
 interface Props {

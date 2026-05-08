@@ -40,6 +40,10 @@ export interface ArmDraft {
    */
   mode: "templates" | "ai";
   aiStyle: string;
+  /** Optional per-arm AI model override. "" = inherit env default. */
+  aiModel: string;
+  /** Optional per-arm two-stage generation flag (draft 3 → critic picks best). */
+  aiTwoStage: boolean;
   primarySelectedIds: string[];
   primaryInline: string;
   /** Empty string = no follow-up for this arm. */
@@ -72,6 +76,8 @@ export function makeArm(name: string, primaryInline = ""): ArmDraft {
     name,
     mode: "templates",
     aiStyle: DEFAULT_PRIMARY_AI_STYLE,
+    aiModel: "",
+    aiTwoStage: false,
     primarySelectedIds: [],
     primaryInline,
     followUpDays: "",
@@ -259,6 +265,44 @@ function ArmCard({
         aiModel={aiModel}
         onSaveInlineToLibrary={onSaveInlineToLibrary}
       />
+
+      {(arm.mode === "ai" || arm.followupMode === "ai") && aiAvailable ? (
+        <div className="bg-background/40 border border-card-border/50 rounded-lg p-3 space-y-2">
+          <div className="text-[10px] uppercase tracking-wide text-text-muted">
+            AI quality (applies to AI-mode messages on this arm)
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            <label className="block text-xs">
+              <span className="text-text-muted block mb-1">Model</span>
+              <select
+                value={arm.aiModel}
+                onChange={(e) => onChange({ aiModel: e.target.value })}
+                className="w-full bg-background border border-card-border rounded px-2 py-1.5"
+              >
+                <option value="">Default ({aiModel})</option>
+                <option value="gpt-4o-mini">gpt-4o-mini (cheap, fast)</option>
+                <option value="gpt-4o">gpt-4o (premium quality)</option>
+              </select>
+            </label>
+            <label className="flex items-start gap-2 text-xs cursor-pointer select-none pt-1">
+              <input
+                type="checkbox"
+                checked={arm.aiTwoStage}
+                onChange={(e) => onChange({ aiTwoStage: e.target.checked })}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="font-medium block">Two-stage generation</span>
+                <span className="text-text-muted">
+                  Draft 3 candidates, GPT picks the best. ~3× cost, noticeably
+                  better quality. Use on the high-stakes arm; A/B against
+                  single-stage to prove the lift.
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+      ) : null}
 
       <div className="flex items-end gap-3">
         <div className="w-40">

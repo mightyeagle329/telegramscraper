@@ -6,10 +6,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import accounts as accounts_mod
+import ai_engagement_writer
 import ai_openers
 import analytics
 import client_pool
+import engagement_bot
+import group_tracker
 import reply_watcher
+import scorecards
 import sender
 import signup as signup_mod
 import target_filter
@@ -54,10 +58,16 @@ groups_store: dict = {}
 JOB_HEALTH_CHECK = "phase1_health_check_all"
 JOB_WARMUP_DAILY = "phase1_warmup_daily"
 JOB_SIGNUP_REAPER = "phase1_signup_reaper"
+JOB_GROUP_TRACKER = "phase3_group_tracker_poll_all"
+JOB_ENGAGEMENT_BOT = "phase3_engagement_bot_cycle"
+JOB_AI_WRITER = "phase3_ai_engagement_writer_cycle"
 
 HEALTH_CHECK_INTERVAL_S = 30 * 60  # every 30 minutes
 WARMUP_INTERVAL_S = 24 * 3600  # once per day
 SIGNUP_REAPER_INTERVAL_S = 60  # reap abandoned signups every minute
+GROUP_TRACKER_INTERVAL_S = 30 * 60  # poll tracked groups every 30 minutes
+ENGAGEMENT_BOT_INTERVAL_S = 5 * 60  # check the engagement-bot queue every 5 minutes
+AI_WRITER_INTERVAL_S = 12 * 3600  # generate fresh engagement content every 12 hours
 
 
 def _persist():
@@ -77,6 +87,45 @@ async def _warmup_job() -> None:
         await warmup.run_warmup_all()
     except Exception as e:
         logger.error(f"scheduled warmup run failed: {e}")
+
+
+async def _group_tracker_job() -> None:
+    """Phase 3 — periodic poll across every tracked owned-group, detecting
+    new joiners and attributing them to the campaign that DM'd them."""
+    try:
+        results = await group_tracker.poll_all()
+        joined_total = sum(r.get("joined", 0) for r in results)
+        if joined_total:
+            logger.info(f"group-tracker cycle: {joined_total} new join(s) across all tracked groups")
+    except Exception as e:
+        logger.error(f"scheduled group-tracker poll failed: {e}")
+
+
+async def _engagement_bot_job() -> None:
+    """Phase 3 — engagement-bot scheduler tick. Reads the content sheet,
+    posts every due row up to MAX_POSTS_PER_CYCLE, marks them done."""
+    try:
+        if not engagement_bot.is_configured():
+            return  # operator hasn't set up the bot yet — silent skip
+        result = await engagement_bot.run_cycle()
+        if result.get("posted"):
+            logger.info(f"engagement-bot cycle: {result}")
+    except Exception as e:
+        logger.error(f"engagement-bot cycle failed: {type(e).__name__}: {e}")
+
+
+async def _ai_writer_job() -> None:
+    """Phase 3 — AI engagement writer tick. Auto-generates a batch of
+    posts and appends them to the bot's content sheet on schedule. The
+    engagement_bot job picks them up and publishes."""
+    try:
+        if not ai_engagement_writer.is_enabled():
+            return  # operator hasn't enabled AI auto-writing — silent skip
+        result = await ai_engagement_writer.run_cycle()
+        if result.get("appended"):
+            logger.info(f"ai-writer cycle: {result}")
+    except Exception as e:
+        logger.error(f"ai-writer cycle failed: {type(e).__name__}: {e}")
 
 
 @asynccontextmanager
@@ -155,7 +204,31 @@ async def lifespan(app: FastAPI):
             id=JOB_SIGNUP_REAPER,
             replace_existing=True,
         )
-        logger.info("Phase 1: scheduled health-check + warmup + signup-reaper jobs")
+        sched.add_job(
+            _group_tracker_job,
+            "interval",
+            seconds=GROUP_TRACKER_INTERVAL_S,
+            id=JOB_GROUP_TRACKER,
+            replace_existing=True,
+        )
+        sched.add_job(
+            _engagement_bot_job,
+            "interval",
+            seconds=ENGAGEMENT_BOT_INTERVAL_S,
+            id=JOB_ENGAGEMENT_BOT,
+            replace_existing=True,
+        )
+        sched.add_job(
+            _ai_writer_job,
+            "interval",
+            seconds=AI_WRITER_INTERVAL_S,
+            id=JOB_AI_WRITER,
+            replace_existing=True,
+        )
+        logger.info(
+            "Scheduled jobs ready (health-check, warmup, signup-reaper, "
+            "group-tracker, engagement-bot, ai-writer)"
+        )
     except Exception as e:
         logger.error(f"Could not register Phase 1 scheduled jobs: {e}")
 
@@ -318,6 +391,246 @@ async def get_group_monitor_status(group_id: str):
 @app.get("/api/monitoring")
 async def get_all_monitoring_status():
     return get_all_monitoring()
+
+
+# =========================================================================
+# Phase 3 — Funnel: tracked groups (the destination, e.g. TitanTreasure).
+# Distinct from /api/groups which is the SCRAPE-SOURCE list.
+# =========================================================================
+
+
+@app.get("/api/tracked-groups")
+async def tracked_groups_list():
+    """List every owned-group under join-tracking."""
+    return group_tracker.list_tracked_groups()
+
+
+@app.post("/api/tracked-groups")
+async def tracked_groups_add(body: dict):
+    """Add a Telegram group to the funnel tracker.
+
+    Body: { url: str, interval_s?: int }. The first scrape happens
+    inline (so the operator gets immediate feedback) and the recurring
+    poll runs on the lifespan scheduler.
+    """
+    url = (body or {}).get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+    interval_s = int((body or {}).get("interval_s") or 0) or group_tracker.DEFAULT_POLL_INTERVAL_S
+    try:
+        return await group_tracker.add_tracked_group(url, interval_s=interval_s)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/tracked-groups/{group_id}")
+async def tracked_groups_remove(group_id: str):
+    ok = await group_tracker.remove_tracked_group(group_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Tracked group not found")
+    return {"removed": True}
+
+
+@app.post("/api/tracked-groups/{group_id}/poll")
+async def tracked_groups_poll(group_id: str):
+    """Force an immediate poll cycle for one tracked group (no waiting for the scheduler)."""
+    return await group_tracker.poll_group(group_id)
+
+
+@app.post("/api/tracked-groups/poll-all")
+async def tracked_groups_poll_all():
+    """Force-poll every tracked group right now."""
+    return {"results": await group_tracker.poll_all()}
+
+
+@app.get("/api/joins")
+async def joins_list(limit: int = 100, group_id: Optional[int] = None, campaign: Optional[str] = None):
+    """Recent join events (attributed + organic), newest at the end."""
+    return group_tracker.list_recent_joins(limit=limit, group_id=group_id, campaign=campaign)
+
+
+@app.get("/api/groups/scorecards")
+async def groups_scorecards():
+    """Phase 3 funnel — tier candidate scrape-source groups by quality.
+
+    For each scraped Google Sheet tab (each is one source group), returns
+    member count, reachable @username %, sent/replied/joined counts, and
+    a T1/T2/T3 tier so the operator can decide which groups to keep
+    scraping vs drop.
+    """
+    return scorecards.compute_scorecards()
+
+
+# =========================================================================
+# Phase 3 — Engagement bot (Google Sheet → Telegram broadcast scheduler).
+# =========================================================================
+
+
+@app.get("/api/bot/status")
+async def bot_status():
+    """Health view of the engagement bot — token, chat, sheet reachability."""
+    return await engagement_bot.get_bot_status()
+
+
+@app.get("/api/bot/queue")
+async def bot_queue():
+    """Full sheet contents — queued + posted + errored rows.
+
+    Frontend uses this to render the bot dashboard's queue and history.
+    """
+    return engagement_bot.list_queue()
+
+
+@app.get("/api/bot/history")
+async def bot_history(limit: int = 50):
+    """Local audit log of every successful post from this backend."""
+    return engagement_bot.list_history(limit=limit)
+
+
+@app.post("/api/bot/post-now/{row_idx}")
+async def bot_post_now(row_idx: int):
+    """Force-post a specific sheet row immediately (manual override)."""
+    return await engagement_bot.post_now(row_idx)
+
+
+@app.post("/api/bot/run-cycle")
+async def bot_run_cycle():
+    """Run one scheduler tick on demand. Same code the lifespan job runs."""
+    if not engagement_bot.is_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="Engagement bot is not configured (see /api/bot/status for missing fields).",
+        )
+    return await engagement_bot.run_cycle()
+
+
+@app.get("/api/bot/writer/config")
+async def bot_writer_config_get():
+    """AI engagement-writer config — auto-generates posts for the bot
+    when enabled. Operator tunes content mix, batch size, active hours,
+    brand voice."""
+    return ai_engagement_writer.load_config()
+
+
+@app.put("/api/bot/writer/config")
+async def bot_writer_config_put(body: dict):
+    """Update the AI writer config. Body merges into the existing config —
+    omitted keys keep their current values."""
+    current = ai_engagement_writer.load_config()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="body must be a JSON object")
+    current.update(body)
+    ai_engagement_writer.save_config(current)
+    return current
+
+
+@app.post("/api/bot/writer/preview")
+async def bot_writer_preview():
+    """Generate a sample batch and RETURN it without writing to the sheet.
+    Lets the operator see what the AI would post before turning it on."""
+    return await ai_engagement_writer.preview()
+
+
+@app.post("/api/bot/writer/run-now")
+async def bot_writer_run_now():
+    """Force-run a generation cycle now AND append to the sheet, even if
+    `enabled=False`. Useful for filling the queue immediately after first
+    setup or whenever the queue runs dry."""
+    return await ai_engagement_writer.run_cycle(force=True)
+
+
+# ---- Phase 3 VA workflow — compose / bulk / edit / delete / approve ----
+
+
+@app.post("/api/bot/post")
+async def bot_post_add(body: dict):
+    """Append one new post to the bot queue.
+
+    Body: { content, scheduled_at, type?, image_url?, status? }
+    """
+    if not engagement_bot.is_configured():
+        raise HTTPException(status_code=400, detail="Engagement bot is not configured")
+    try:
+        return engagement_bot.add_post(
+            content=str((body or {}).get("content") or ""),
+            scheduled_at=str((body or {}).get("scheduled_at") or ""),
+            post_type=str((body or {}).get("type") or "win"),
+            image_url=str((body or {}).get("image_url") or ""),
+            chat_id=str((body or {}).get("chat_id") or ""),
+            status=str((body or {}).get("status") or ""),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/bot/posts/bulk")
+async def bot_posts_bulk(body: dict):
+    """Append many posts at once, time-distributed across the active window.
+
+    Body: {
+        items: [{ content: str, type?: str, image_url?: str }, ...],
+        spread_days?: int = 1,
+        posts_per_day?: int,           // overrides automatic per-day count
+        pending_review?: bool = false  // mark every row as pending VA approval
+    }
+    """
+    if not engagement_bot.is_configured():
+        raise HTTPException(status_code=400, detail="Engagement bot is not configured")
+    items = (body or {}).get("items") or []
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="items must be a non-empty list")
+    try:
+        added = engagement_bot.bulk_add_posts(
+            items=items,
+            spread_days=int((body or {}).get("spread_days") or 1),
+            posts_per_day=(body or {}).get("posts_per_day"),
+            pending_review=bool((body or {}).get("pending_review", False)),
+        )
+        return {"added": len(added), "rows": added}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/api/bot/post/{row_idx}")
+async def bot_post_update(row_idx: int, body: dict):
+    """Update one or more fields on a queued post (content / scheduled_at / type / image_url / status)."""
+    if not engagement_bot.is_configured():
+        raise HTTPException(status_code=400, detail="Engagement bot is not configured")
+    try:
+        return engagement_bot.update_post(row_idx, body or {})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/bot/post/{row_idx}")
+async def bot_post_delete(row_idx: int):
+    """Delete a queued post by sheet row number."""
+    if not engagement_bot.is_configured():
+        raise HTTPException(status_code=400, detail="Engagement bot is not configured")
+    try:
+        ok = engagement_bot.delete_post(row_idx)
+        return {"deleted": bool(ok)}
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/bot/post/{row_idx}/approve")
+async def bot_post_approve(row_idx: int):
+    """Approve a pending-review post so the next publish cycle picks it up."""
+    if not engagement_bot.is_configured():
+        raise HTTPException(status_code=400, detail="Engagement bot is not configured")
+    try:
+        return engagement_bot.approve_post(row_idx)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/sheets/stats")

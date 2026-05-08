@@ -1,0 +1,12 @@
+[
+  {
+    "id": "phase3-test-1",
+    "row": 2,
+    "content": "Outpilot Phase 3 \u2014 engagement bot online. This is an automated test post.",
+    "type": "system",
+    "chat_id": "-1003777356353",
+    "telegram_message_id": 276,
+    "posted_at": "2026-05-07T06:43:02.579899+00:00",
+    "manual": false
+  }
+]

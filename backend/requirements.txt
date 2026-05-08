@@ -12,3 +12,6 @@ python-socks[asyncio]==2.5.1
 # openai 1.55+ is required: 1.54 passes a deprecated `proxies` kwarg to
 # httpx and crashes on httpx >= 0.28.
 openai==1.78.1
+# Phase 3 — engagement bot uses Telegram's Bot API (different surface from
+# the user-account MTProto used elsewhere in this repo).
+python-telegram-bot==21.6

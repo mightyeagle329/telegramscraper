@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from accounts import load_accounts, public_view
+from group_tracker import _load_joins
 from reply_watcher import _load_replies
 from sender import _load_sent_log
 
@@ -56,6 +57,7 @@ def compute_summary(days: int = 14) -> dict:
     sent_log = _load_sent_log()
     replies = _load_replies()
     accounts = load_accounts()
+    joins = _load_joins()
 
     # --- pre-walk + filter sent_log ---
     in_window: list[dict] = []
@@ -110,9 +112,29 @@ def compute_summary(days: int = 14) -> dict:
     replied = len(repliers_in_window)
     reply_rate = (replied / sent) if sent > 0 else 0.0
 
+    # --- joins (Phase 3 funnel) — also filter to window ---
+    joiners_in_window: set[int] = set()
+    attributed_joins_in_window: list[dict] = []
+    for j in joins:
+        dt = _parse_iso(j.get("joined_at"))
+        if dt is None or dt < cutoff:
+            continue
+        try:
+            uid = int(j.get("user_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if not uid:
+            continue
+        joiners_in_window.add(uid)
+        if j.get("attributed"):
+            attributed_joins_in_window.append(j)
+    joined = len(joiners_in_window)
+    attributed_joined = len(attributed_joins_in_window)
+    join_rate = (attributed_joined / sent) if sent > 0 else 0.0
+
     # --- daily volume ---
     daily_map: dict[str, dict[str, int]] = defaultdict(
-        lambda: {"sent": 0, "skipped": 0, "errored": 0, "replied": 0}
+        lambda: {"sent": 0, "skipped": 0, "errored": 0, "replied": 0, "joined": 0}
     )
     # Seed every day in window so the chart has zero-buckets for empty days.
     for i in range(days):
@@ -144,6 +166,15 @@ def compute_summary(days: int = 14) -> dict:
             continue
         daily_map[_date_key(dt)]["replied"] += 1
 
+    # Daily join distribution — every join lands on its own day's bucket.
+    # Useful for spotting which campaign-launch days produced the biggest
+    # join spike (typically 1-2 days after the campaign starts).
+    for j in joins:
+        dt = _parse_iso(j.get("joined_at"))
+        if dt is None or dt < cutoff:
+            continue
+        daily_map[_date_key(dt)]["joined"] += 1
+
     daily_volume = [
         {"date": d, **daily_map[d]}
         for d in sorted(daily_map.keys())
@@ -164,6 +195,17 @@ def compute_summary(days: int = 14) -> dict:
     for aid, uid in repliers_in_window:
         per_account_replies[aid].add(uid)
 
+    # Per-account joins — count attributed joins where source_account matches.
+    per_account_joins: dict[str, set[int]] = defaultdict(set)
+    for j in attributed_joins_in_window:
+        aid = j.get("source_account") or ""
+        try:
+            uid = int(j.get("user_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if aid and uid:
+            per_account_joins[aid].add(uid)
+
     per_account: list[dict] = []
     # Surface every known account, including ones with zero activity in the
     # window — makes the dashboard feel "complete" instead of hiding idle
@@ -172,6 +214,7 @@ def compute_summary(days: int = 14) -> dict:
         view = public_view(acct)
         sent_n = per_account_send.get(aid, 0)
         replied_n = len(per_account_replies.get(aid, set()))
+        joined_n = len(per_account_joins.get(aid, set()))
         per_account.append(
             {
                 "account_id": aid,
@@ -182,7 +225,9 @@ def compute_summary(days: int = 14) -> dict:
                 "sent_in_window": sent_n,
                 "skipped_in_window": per_account_skip.get(aid, 0),
                 "replied_in_window": replied_n,
+                "joined_in_window": joined_n,
                 "reply_rate": round((replied_n / sent_n) if sent_n else 0.0, 4),
+                "join_rate": round((joined_n / sent_n) if sent_n else 0.0, 4),
             }
         )
     per_account.sort(key=lambda r: (-r["sent_in_window"], r["account_id"]))
@@ -229,49 +274,87 @@ def compute_summary(days: int = 14) -> dict:
                     by_campaign[c]["arms"][arm]["replied"].add(uid)
                 break
 
+    # Per-campaign + per-arm joins, in-window only. Only attributed joins
+    # count — organic joins don't credit any campaign.
+    by_campaign_joined: dict[str, dict[str, set[int]]] = defaultdict(
+        lambda: defaultdict(set)
+    )
+    for j in attributed_joins_in_window:
+        c = j.get("source_campaign") or ""
+        if not c:
+            continue
+        arm = j.get("source_arm") or "A"
+        try:
+            uid = int(j.get("user_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if uid:
+            by_campaign_joined[c][arm].add(uid)
+
     per_campaign: list[dict] = []
     for c, payload in by_campaign.items():
         arms = payload["arms"]
         arm_rows = []
-        best_rate = -1.0
-        winner: Optional[str] = None
-        tie = False
+        best_reply_rate = -1.0
+        best_join_rate = -1.0
+        reply_winner: Optional[str] = None
+        join_winner: Optional[str] = None
+        reply_tie = False
+        join_tie = False
         c_sent = 0
         c_replied = 0
+        c_joined = 0
         for arm_name in sorted(arms.keys()):
             s = arms[arm_name]["sent"]
             r_n = len(arms[arm_name]["replied"])
+            j_n = len(by_campaign_joined.get(c, {}).get(arm_name, set()))
             rate = (r_n / s) if s else 0.0
+            j_rate = (j_n / s) if s else 0.0
             arm_rows.append(
                 {
                     "name": arm_name,
                     "sent": s,
                     "replied": r_n,
+                    "joined": j_n,
                     "reply_rate": round(rate, 4),
+                    "join_rate": round(j_rate, 4),
                 }
             )
             c_sent += s
             c_replied += r_n
+            c_joined += j_n
             if s > 0:
-                if rate > best_rate:
-                    best_rate = rate
-                    winner = arm_name
-                    tie = False
-                elif rate == best_rate:
-                    tie = True
+                if rate > best_reply_rate:
+                    best_reply_rate = rate
+                    reply_winner = arm_name
+                    reply_tie = False
+                elif rate == best_reply_rate:
+                    reply_tie = True
+                if j_rate > best_join_rate:
+                    best_join_rate = j_rate
+                    join_winner = arm_name
+                    join_tie = False
+                elif j_rate == best_join_rate:
+                    join_tie = True
         per_campaign.append(
             {
                 "campaign": c,
                 "sent": c_sent,
                 "replied": c_replied,
+                "joined": c_joined,
                 "reply_rate": round((c_replied / c_sent) if c_sent else 0.0, 4),
+                "join_rate": round((c_joined / c_sent) if c_sent else 0.0, 4),
                 "arms": arm_rows,
                 "winner": (
-                    None if (tie or winner is None or best_rate <= 0) else winner
+                    None if (reply_tie or reply_winner is None or best_reply_rate <= 0) else reply_winner
+                ),
+                "join_winner": (
+                    None if (join_tie or join_winner is None or best_join_rate <= 0) else join_winner
                 ),
             }
         )
-    per_campaign.sort(key=lambda r: (-r["sent"], r["campaign"]))
+    # Sort by joined first (the new KPI), break ties by sent.
+    per_campaign.sort(key=lambda r: (-r["joined"], -r["sent"], r["campaign"]))
 
     # --- skip reasons histogram ---
     reason_counts: dict[str, int] = defaultdict(int)
@@ -300,6 +383,9 @@ def compute_summary(days: int = 14) -> dict:
             "paused": paused,
             "replied": replied,
             "reply_rate": round(reply_rate, 4),
+            "joined": joined,
+            "attributed_joined": attributed_joined,
+            "join_rate": round(join_rate, 4),
             "unique_targets": len(unique_targets),
         },
         "daily_volume": daily_volume,

@@ -32,3 +32,18 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 # OpenAI (Phase 2C — AI-generated personalized openers).
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+# Phase 3 — Engagement bot (Telegram Bot API, distinct from MTProto/Telethon).
+# Register a bot via @BotFather, copy the token, paste it here. Add the bot
+# to your owned group as admin so it can post.
+ENGAGEMENT_BOT_TOKEN = os.getenv("ENGAGEMENT_BOT_TOKEN", "")
+# The default destination chat for posts. Either a public @channelname or a
+# numeric chat_id (-100... for supergroups). Operator can override per-post
+# via the Sheet's chat_id column if they want.
+ENGAGEMENT_BOT_CHAT_ID = os.getenv("ENGAGEMENT_BOT_CHAT_ID", "")
+# Google Sheet ID containing the engagement-bot content queue (separate
+# spreadsheet from the scraper's member sheets — keeps concerns clean).
+# Leave blank and the bot scheduler will refuse to run.
+ENGAGEMENT_BOT_SHEET_ID = os.getenv("ENGAGEMENT_BOT_SHEET_ID", "")
+# Tab name within the spreadsheet that holds the post queue.
+ENGAGEMENT_BOT_SHEET_TAB = os.getenv("ENGAGEMENT_BOT_SHEET_TAB", "Posts")

@@ -406,9 +406,18 @@ async def distribute_arms_round_robin(
             continue
         from ai_openers import generate_openers_for_targets
 
+        # Per-arm quality knobs — defaults inherit env OPENAI_MODEL +
+        # cheap single-stage if the arm didn't override.
+        arm_model = arm.get("ai_model") or None
+        arm_two_stage = bool(arm.get("ai_two_stage"))
+
         if primary_style:
             openers = await generate_openers_for_targets(
-                arm_targets, group_name=group_name, style=primary_style
+                arm_targets,
+                group_name=group_name,
+                style=primary_style,
+                model=arm_model,
+                two_stage=arm_two_stage,
             )
             ai_primary_by_arm[ai] = {
                 int(t["user_id"]): openers[i]
@@ -417,7 +426,11 @@ async def distribute_arms_round_robin(
             }
         if followup_style:
             f_openers = await generate_openers_for_targets(
-                arm_targets, group_name=group_name, style=followup_style
+                arm_targets,
+                group_name=group_name,
+                style=followup_style,
+                model=arm_model,
+                two_stage=arm_two_stage,
             )
             ai_followup_by_arm[ai] = {
                 int(t["user_id"]): f_openers[i]
@@ -618,12 +631,56 @@ async def campaign_arm_stats(campaign: str) -> dict:
             elif rate == best_rate:
                 tie = True
 
+    # Phase 3 — overlay funnel join data per arm. Joins are attributed at
+    # group-tracker time, so this is a cheap dict lookup.
+    arm_joined: dict[str, set[int]] = {}
+    try:
+        from group_tracker import joins_for_campaign
+
+        for j in joins_for_campaign(campaign):
+            arm = j.get("source_arm") or "A"
+            try:
+                uid = int(j.get("user_id") or 0)
+            except (TypeError, ValueError):
+                continue
+            if uid:
+                arm_joined.setdefault(arm, set()).add(uid)
+    except Exception:
+        # group_tracker may not be configured yet — non-fatal, leave joins=0.
+        pass
+
+    # Re-walk arms_out and add joined / join_rate per arm.
+    for row in arms_out:
+        joined = len(arm_joined.get(row["name"], set()))
+        row["joined"] = joined
+        row["join_rate"] = round((joined / row["sent"]) if row["sent"] > 0 else 0.0, 4)
+
+    # Pick the join-rate winner separately — usually the same as reply-rate
+    # winner, but not always, and joins are the funnel KPI now.
+    best_join_rate = -1.0
+    join_winner: Optional[str] = None
+    join_tie = False
+    for row in arms_out:
+        if row["sent"] > 0:
+            if row["join_rate"] > best_join_rate:
+                best_join_rate = row["join_rate"]
+                join_winner = row["name"]
+                join_tie = False
+            elif row["join_rate"] == best_join_rate:
+                join_tie = True
+
+    total_joined = sum(len(v) for v in arm_joined.values())
+
     return {
         "campaign": campaign,
         "arms": arms_out,
         "winner": None if (tie or best_arm is None or best_rate <= 0) else best_arm,
+        "join_winner": (
+            None if (join_tie or join_winner is None or best_join_rate <= 0) else join_winner
+        ),
         "total_sent": sum(arm_sent.values()),
         "total_replied": sum(len(v) for v in arm_replied.values()),
+        "total_joined": total_joined,
     }
 
 

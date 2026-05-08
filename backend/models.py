@@ -159,6 +159,15 @@ class CampaignArm(BaseModel):
     # campaign launch alongside the primary opener (so cost and failure
     # mode stay predictable). When set, ``follow_up_templates`` is ignored.
     follow_up_ai_style: Optional[str] = None
+    # Quality knobs (Phase 3 quality pack).
+    # Override the default OPENAI_MODEL for this arm only — e.g. "gpt-4o"
+    # for premium quality on the high-stakes arm while the control arm
+    # uses gpt-4o-mini. None = inherit OPENAI_MODEL from the env.
+    ai_model: Optional[str] = None
+    # Enable two-stage generation (draft 3 → critic picks best). ~3x
+    # the per-message cost, but visibly better quality. Useful for
+    # head-to-head A/B testing of single-stage vs two-stage.
+    ai_two_stage: bool = False
 
 
 class CampaignFromSheetRequest(BaseModel):

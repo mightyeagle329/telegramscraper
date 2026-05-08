@@ -224,6 +224,8 @@ export default function CampaignsPage() {
         follow_up_after_days: wantsFollowup ? followDays : null,
         follow_up_templates,
         follow_up_ai_style,
+        ai_model: a.aiModel || undefined,
+        ai_two_stage: a.aiTwoStage,
       });
     }
     return { ok: true, arms: out };
@@ -745,15 +747,26 @@ export default function CampaignsPage() {
 }
 
 function ArmStatsTable({ stats }: { stats: CampaignStats }) {
-  const max = Math.max(...stats.arms.map((a) => a.reply_rate), 0);
+  // Bar visualises join rate (the funnel KPI) since Phase 3 — reply
+  // rate is still shown in the table but the bar follows joins.
+  const max = Math.max(...stats.arms.map((a) => a.join_rate), 0.0001);
   return (
     <div>
       <div className="text-xs text-text-muted mb-2">
-        {stats.total_sent} primary sends · {stats.total_replied} replies
-        {stats.winner ? (
+        {stats.total_sent} primary sends · {stats.total_replied} replies ·{" "}
+        <span className="text-accent-yellow">{stats.total_joined} group joins</span>
+        {stats.join_winner ? (
           <>
             {" "}
-            · winner: <strong className="text-accent-green">{stats.winner}</strong>
+            · join winner:{" "}
+            <strong className="text-accent-yellow">{stats.join_winner}</strong>
+          </>
+        ) : null}
+        {stats.winner && stats.winner !== stats.join_winner ? (
+          <>
+            {" "}
+            · reply winner:{" "}
+            <strong className="text-accent-green">{stats.winner}</strong>
           </>
         ) : null}
       </div>
@@ -763,15 +776,19 @@ function ArmStatsTable({ stats }: { stats: CampaignStats }) {
             <th className="text-left py-1 font-normal">Arm</th>
             <th className="text-right py-1 font-normal">Sent</th>
             <th className="text-right py-1 font-normal">Replied</th>
-            <th className="text-right py-1 font-normal">Reply rate</th>
-            <th className="text-left py-1 font-normal w-1/3 pl-3">Bar</th>
+            <th className="text-right py-1 font-normal">Joined</th>
+            <th className="text-right py-1 font-normal">Reply %</th>
+            <th className="text-right py-1 font-normal">Join %</th>
+            <th className="text-left py-1 font-normal w-1/4 pl-3">Join bar</th>
           </tr>
         </thead>
         <tbody>
           {stats.arms.map((a) => {
-            const isWinner = stats.winner === a.name;
-            const pct = (a.reply_rate * 100).toFixed(1);
-            const widthPct = max > 0 ? (a.reply_rate / max) * 100 : 0;
+            const isJoinWinner = stats.join_winner === a.name;
+            const isReplyWinner = stats.winner === a.name;
+            const replyPct = (a.reply_rate * 100).toFixed(1);
+            const joinPct = (a.join_rate * 100).toFixed(1);
+            const widthPct = max > 0 ? (a.join_rate / max) * 100 : 0;
             return (
               <tr
                 key={a.name}
@@ -780,28 +797,36 @@ function ArmStatsTable({ stats }: { stats: CampaignStats }) {
                 <td className="py-1.5">
                   <span
                     className={
-                      isWinner
-                        ? "font-bold text-accent-green"
+                      isJoinWinner
+                        ? "font-bold text-accent-yellow"
                         : "font-medium"
                     }
                   >
                     {a.name}
                   </span>
-                  {isWinner ? (
+                  {isJoinWinner ? (
+                    <span className="ml-2 text-[10px] uppercase tracking-wider text-accent-yellow">
+                      join winner
+                    </span>
+                  ) : isReplyWinner ? (
                     <span className="ml-2 text-[10px] uppercase tracking-wider text-accent-green">
-                      winner
+                      reply winner
                     </span>
                   ) : null}
                 </td>
                 <td className="text-right py-1.5 font-mono">{a.sent}</td>
                 <td className="text-right py-1.5 font-mono">{a.replied}</td>
-                <td className="text-right py-1.5 font-mono">{pct}%</td>
+                <td className="text-right py-1.5 font-mono text-accent-yellow">
+                  {a.joined}
+                </td>
+                <td className="text-right py-1.5 font-mono">{replyPct}%</td>
+                <td className="text-right py-1.5 font-mono">{joinPct}%</td>
                 <td className="pl-3 py-1.5">
                   <div className="h-2 bg-card-border/30 rounded overflow-hidden">
                     <div
                       className={
-                        isWinner
-                          ? "h-full bg-accent-green"
+                        isJoinWinner
+                          ? "h-full bg-accent-yellow"
                           : "h-full bg-accent-blue/60"
                       }
                       style={{ width: `${widthPct}%` }}
