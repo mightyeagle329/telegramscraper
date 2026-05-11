@@ -252,8 +252,8 @@ export default function DashboardHome() {
                       </span>{" "}
                       → {r.account_id}
                     </span>
-                    <span>
-                      {new Date(r.received_at).toLocaleTimeString()}
+                    <span title={new Date(r.received_at).toISOString()}>
+                      {new Date(r.received_at).toLocaleString()}
                     </span>
                   </div>
                   <div className="text-sm mt-1 break-words">
