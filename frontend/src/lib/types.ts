@@ -112,6 +112,25 @@ export interface AIStatus {
   model: string;
 }
 
+export interface AutoResponseEntry {
+  account_id: string;
+  recipient_user_id: number;
+  recipient_username?: string | null;
+  sentiment: "positive" | "neutral" | "negative";
+  response?: string;
+  message_id?: number | null;
+  skipped: boolean;
+  skip_reason?: string | null;
+  recorded_at: string;
+}
+
+export interface AutoResponseConfig {
+  enabled: boolean;
+  group_url: string;
+  style: string;
+  fallback: string;
+}
+
 export interface CampaignRun {
   run_id: string;
   campaign: string;

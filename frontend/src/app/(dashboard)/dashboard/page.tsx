@@ -4,7 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useT } from "@/lib/i18n/context";
-import type { Account, ReplyEntry, SentLogEntry } from "@/lib/types";
+import type {
+  Account,
+  AutoResponseConfig,
+  AutoResponseEntry,
+  ReplyEntry,
+  SentLogEntry,
+} from "@/lib/types";
 
 const PAGE_SIZE = 10;
 
@@ -278,6 +284,8 @@ export default function DashboardHome() {
         ) : null}
       </section>
 
+      <AutoResponsesSection />
+
       <section className="card-elevated p-5">
         <h2 className="text-lg font-semibold mb-3">
           {t("dashboard.actions.title")}
@@ -334,5 +342,161 @@ function ActionCard({
       <div className="font-medium">{title}</div>
       <div className="text-text-muted text-xs mt-1">{body}</div>
     </Link>
+  );
+}
+
+/**
+ * Auto-responses panel — shows GPT-drafted replies the system sent
+ * automatically when recipients responded to cold DMs. Fires once per
+ * recipient; subsequent messages from them stay manual.
+ */
+function AutoResponsesSection() {
+  const [rows, setRows] = useState<AutoResponseEntry[]>([]);
+  const [cfg, setCfg] = useState<AutoResponseConfig | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const [r, c] = await Promise.all([
+        api.listAutoResponses({ limit: 30 }),
+        api.getAutoResponseConfig(),
+      ]);
+      setRows(r);
+      setCfg(c);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const interval = setInterval(refresh, 30_000);
+    return () => clearInterval(interval);
+  }, [refresh]);
+
+  async function runBackfill() {
+    if (
+      !confirm(
+        "Queue auto-responses for every reply in the last 7 days we haven't replied to yet?"
+      )
+    )
+      return;
+    setBackfilling(true);
+    setBackfillMsg(null);
+    try {
+      const r = await api.backfillAutoResponses(168);
+      setBackfillMsg(
+        r.queued === 0
+          ? "Nothing to backfill — every recent reply has already been auto-handled."
+          : `Queued ${r.queued} auto-responses across ${r.accounts} accounts. They'll send over the next ~${Math.max(5, Math.ceil((r.queued / Math.max(1, r.accounts)) * 2))} minutes (staggered per account so we don't burst Telegram).`
+      );
+      await refresh();
+    } catch (e) {
+      setBackfillMsg(e instanceof Error ? e.message : "Backfill failed");
+    } finally {
+      setBackfilling(false);
+    }
+  }
+
+  if (!cfg) return null;
+
+  const sent = rows.filter((r) => !r.skipped);
+  const skipped = rows.filter((r) => r.skipped);
+
+  return (
+    <section className="card-elevated p-5">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <h2 className="text-lg font-semibold">Auto-responses</h2>
+          <p className="text-xs text-text-muted mt-0.5">
+            When someone replies to a cold DM, the system fires ONE
+            GPT-drafted response that invites them to the group. Fires
+            once per recipient; further messages from them stay manual.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <span
+            className={`text-xs font-medium ${
+              cfg.enabled ? "text-accent-green" : "text-text-muted"
+            }`}
+          >
+            {cfg.enabled ? "Enabled" : "Disabled"} · pitches{" "}
+            <code className="text-xs">{cfg.group_url}</code>
+          </span>
+          <button
+            onClick={runBackfill}
+            disabled={backfilling || !cfg.enabled}
+            className="text-xs px-3 py-1.5 border border-card-border rounded-lg hover:border-foreground/40 disabled:opacity-50"
+            title="Auto-respond to every recent reply we haven't handled yet (last 7 days)"
+          >
+            {backfilling ? "Queueing…" : "Backfill last 7 days"}
+          </button>
+        </div>
+      </div>
+      {backfillMsg ? (
+        <div className="text-xs text-text-muted mb-3 bg-card-bg border border-card-border rounded-lg px-3 py-2">
+          {backfillMsg}
+        </div>
+      ) : null}
+      {rows.length === 0 ? (
+        <p className="text-text-muted text-sm">
+          No auto-responses sent yet. They appear here once recipients
+          start replying to active campaigns.
+        </p>
+      ) : (
+        <>
+          <div className="text-xs text-text-muted mb-2">
+            {sent.length} sent · {skipped.length} skipped
+            {skipped.length > 0 ? " (negative sentiment or validation)" : ""}
+          </div>
+          <ul className="space-y-2 text-sm max-h-96 overflow-y-auto pr-1">
+            {rows
+              .slice()
+              .reverse()
+              .map((r, i) => (
+                <li
+                  key={`${r.account_id}-${r.recipient_user_id}-${i}`}
+                  className="border-b border-card-border/40 pb-2 last:border-b-0"
+                >
+                  <div className="flex items-center justify-between gap-3 text-xs text-text-muted">
+                    <span>
+                      <span className="text-foreground font-medium">
+                        {r.recipient_username
+                          ? `@${r.recipient_username}`
+                          : r.recipient_user_id}
+                      </span>{" "}
+                      · sent via {r.account_id} · sentiment{" "}
+                      <span
+                        className={
+                          r.sentiment === "positive"
+                            ? "text-accent-green"
+                            : r.sentiment === "negative"
+                            ? "text-accent-red"
+                            : ""
+                        }
+                      >
+                        {r.sentiment}
+                      </span>
+                    </span>
+                    <span title={new Date(r.recorded_at).toISOString()}>
+                      {new Date(r.recorded_at).toLocaleString()}
+                    </span>
+                  </div>
+                  {r.skipped ? (
+                    <div className="text-xs text-accent-yellow mt-1">
+                      Skipped: {r.skip_reason || "no reason"}
+                    </div>
+                  ) : (
+                    <div className="text-sm mt-1 break-words">
+                      {r.response}
+                    </div>
+                  )}
+                </li>
+              ))}
+          </ul>
+        </>
+      )}
+    </section>
   );
 }

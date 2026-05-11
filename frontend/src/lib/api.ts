@@ -2,6 +2,8 @@ import type {
   Account,
   AIStatus,
   AnalyticsSummary,
+  AutoResponseConfig,
+  AutoResponseEntry,
   BotHistoryEntry,
   BotQueueRow,
   BotStatus,
@@ -251,6 +253,28 @@ export const api = {
     request<CampaignRun>(`/api/campaigns/runs/${runId}`),
 
   getAIStatus: () => request<AIStatus>(`/api/campaigns/ai/status`),
+
+  // -------- Phase 3: Auto-respond to first reply --------
+  listAutoResponses: (params?: { limit?: number; account_id?: string }) => {
+    const q = new URLSearchParams();
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.account_id) q.set("account_id", params.account_id);
+    const qs = q.toString();
+    return request<AutoResponseEntry[]>(
+      `/api/auto-responses${qs ? `?${qs}` : ""}`
+    );
+  },
+  getAutoResponseConfig: () =>
+    request<AutoResponseConfig>(`/api/auto-responses/config`),
+  backfillAutoResponses: (sinceHours = 168) =>
+    request<{
+      queued: number;
+      accounts: number;
+      per_account: Record<string, number>;
+      since_hours: number;
+    }>(`/api/auto-responses/backfill?since_hours=${sinceHours}`, {
+      method: "POST",
+    }),
 
   getAnalyticsSummary: (days = 14) =>
     request<AnalyticsSummary>(`/api/analytics/summary?days=${days}`),

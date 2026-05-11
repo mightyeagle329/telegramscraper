@@ -13,6 +13,7 @@ import campaign_runs
 import client_pool
 import engagement_bot
 import group_tracker
+import reply_responder
 import reply_watcher
 import scorecards
 import sender
@@ -863,6 +864,49 @@ async def list_replies(limit: int = 50, account_id: Optional[str] = None):
     user into ``replies.json``. This endpoint returns the tail of that file.
     """
     return reply_watcher.list_recent_replies(limit=limit, account_id=account_id)
+
+
+@app.get("/api/auto-responses")
+async def list_auto_responses(limit: int = 50, account_id: Optional[str] = None):
+    """Recent auto-responses we sent after recipients replied to cold DMs.
+
+    Each row has account_id, recipient, sentiment, response (or empty if
+    skipped), and a skipped/skip_reason field for the negative-sentiment
+    and validation-failure cases.
+    """
+    return reply_responder.list_recent(limit=limit, account_id=account_id)
+
+
+@app.post("/api/auto-responses/backfill")
+async def auto_responses_backfill(since_hours: int = 168):
+    """Catch up on past replies that landed before this feature was
+    deployed (or while it was off). Queues an auto-response for every
+    recipient in the last `since_hours` hours we haven't auto-replied to
+    yet, staggered per account.
+
+    Defaults to a 7-day lookback (168 hours). Pass `?since_hours=24` to
+    only handle the last day.
+    """
+    return await reply_responder.backfill_auto_responses(since_hours=int(since_hours))
+
+
+@app.get("/api/auto-responses/config")
+async def auto_responses_config():
+    """Current auto-reply config (from env). Used by the dashboard to
+    show whether auto-reply is on + which group URL we're pitching."""
+    from config import (
+        AUTO_REPLY_ENABLED,
+        AUTO_REPLY_GROUP_URL,
+        AUTO_REPLY_STYLE,
+        AUTO_REPLY_FALLBACK,
+    )
+
+    return {
+        "enabled": AUTO_REPLY_ENABLED,
+        "group_url": AUTO_REPLY_GROUP_URL,
+        "style": AUTO_REPLY_STYLE,
+        "fallback": AUTO_REPLY_FALLBACK,
+    }
 
 
 @app.get("/api/sender/queue")

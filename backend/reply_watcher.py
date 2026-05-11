@@ -170,6 +170,23 @@ def register_handler_for_account(account_id: str, client) -> bool:
                 f"[{account_id}] reply from {sender_id}"
                 + (f", cancelled {cancelled} follow-up(s)" if cancelled else "")
             )
+            # Phase 3 — fire-and-forget auto-response. Background task so
+            # the reply handler returns immediately (auto-respond runs a
+            # 30-90s human-like delay + GPT call before sending).
+            try:
+                import asyncio as _asyncio
+                from reply_responder import maybe_auto_respond
+
+                _asyncio.create_task(
+                    maybe_auto_respond(
+                        account_id=account_id,
+                        sender_user_id=sender_id,
+                        sender_username=getattr(sender, "username", None),
+                        reply_text=text,
+                    )
+                )
+            except Exception as e:
+                logger.warning(f"[{account_id}] could not schedule auto-respond: {e}")
         except Exception as e:
             # Never let handler errors crash the Telethon update loop.
             logger.warning(

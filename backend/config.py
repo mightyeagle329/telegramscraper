@@ -47,3 +47,21 @@ ENGAGEMENT_BOT_CHAT_ID = os.getenv("ENGAGEMENT_BOT_CHAT_ID", "")
 ENGAGEMENT_BOT_SHEET_ID = os.getenv("ENGAGEMENT_BOT_SHEET_ID", "")
 # Tab name within the spreadsheet that holds the post queue.
 ENGAGEMENT_BOT_SHEET_TAB = os.getenv("ENGAGEMENT_BOT_SHEET_TAB", "Posts")
+
+# Phase 3 — Auto-respond to first reply.
+# When a cold-DM recipient replies, the system fires ONE AI-generated
+# response that pivots to the destination group invite. Fires only once
+# per recipient; subsequent messages stay manual for the VA/operator.
+AUTO_REPLY_ENABLED = os.getenv("AUTO_REPLY_ENABLED", "true").lower() in ("1", "true", "yes")
+AUTO_REPLY_GROUP_URL = os.getenv("AUTO_REPLY_GROUP_URL", "https://t.me/titantreasurecasino")
+AUTO_REPLY_STYLE = os.getenv(
+    "AUTO_REPLY_STYLE",
+    "Casual, friendly, brief. Acknowledge their reply naturally, then invite them "
+    "to the community group. Don't be salesy — sound like a real member.",
+)
+# Used if the OpenAI call fails (timeout / quota / bad JSON). {url} is
+# replaced with AUTO_REPLY_GROUP_URL at send time.
+AUTO_REPLY_FALLBACK = os.getenv(
+    "AUTO_REPLY_FALLBACK",
+    "Thanks for replying! We run a community group — feel free to drop in: {url}",
+)
