@@ -326,7 +326,7 @@ export interface ReplyEntry {
 }
 
 export interface WorkerStatus {
-  [account_id: string]: "running" | "paused" | "stopped";
+  [account_id: string]: "running" | "resting" | "stopped";
 }
 
 export interface SignupStartResponse {

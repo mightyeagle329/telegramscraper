@@ -1147,12 +1147,23 @@ async def stop_worker(account_id: str, disconnect: bool = False) -> bool:
 
 
 def worker_status() -> dict[str, str]:
+    """Public worker status for the dashboard.
+
+    Returns one of:
+      - "running"  — worker is actively serving its queue
+      - "resting"  — internal cooldown active (PeerFlood/FloodWait
+                     backoff). The worker is alive and will resume
+                     automatically; we use "resting" instead of "paused"
+                     so the dashboard doesn't flag this as a problem
+                     state — it's normal self-throttling behaviour.
+      - "stopped"  — task has exited (account banned or worker crashed)
+    """
     out: dict[str, str] = {}
     for aid, task in _workers.items():
         if task.done():
             out[aid] = "stopped"
         elif _pause_until.get(aid, 0) > datetime.now(timezone.utc).timestamp():
-            out[aid] = "paused"
+            out[aid] = "resting"
         else:
             out[aid] = "running"
     return out

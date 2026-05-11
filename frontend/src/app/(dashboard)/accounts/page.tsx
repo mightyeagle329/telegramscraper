@@ -209,10 +209,15 @@ export default function AccountsPage() {
                           className={`text-xs ${
                             wstate === "running"
                               ? "text-accent-green"
-                              : wstate === "paused"
-                              ? "text-blue-400"
+                              : wstate === "resting"
+                              ? "text-accent-yellow"
                               : "text-text-muted"
                           }`}
+                          title={
+                            wstate === "resting"
+                              ? "Worker is in a short internal cooldown after a TG rate-limit event. Auto-resumes on its own — no action needed."
+                              : undefined
+                          }
                         >
                           {wstate}
                         </span>
