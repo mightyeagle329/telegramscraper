@@ -9,6 +9,7 @@ import accounts as accounts_mod
 import ai_engagement_writer
 import ai_openers
 import analytics
+import campaign_runs
 import client_pool
 import engagement_bot
 import group_tracker
@@ -1126,6 +1127,54 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
             "deduped_out": deduped_out,
             "arms": [a["name"] for a in arms],
         }
+
+    # Large campaigns (esp. AI mode) take 5-15 minutes to generate openers
+    # for every target — long past Cloudflare's 100s edge timeout. Run
+    # them in the background as chunked work, return immediately with a
+    # run_id the frontend can poll. Sender workers start firing DMs as
+    # soon as the first chunk is enqueued (~30s after launch).
+    has_ai = any(
+        (a.get("ai_style") or "").strip() or (a.get("follow_up_ai_style") or "").strip()
+        for a in arms
+    )
+    BACKGROUND_THRESHOLD = 30  # below this, do it inline — fast + simpler
+    use_background = has_ai and len(targets) > BACKGROUND_THRESHOLD
+
+    if use_background:
+        import asyncio
+
+        run_id = campaign_runs.new_run_id()
+        await campaign_runs.create_run(
+            run_id=run_id,
+            campaign=req.campaign or req.sheet_group_name,
+            targets_total=len(targets),
+            arms=[a["name"] for a in arms],
+            account_ids=req.account_ids,
+        )
+        # Fire and forget — the runner persists status to disk.
+        asyncio.create_task(
+            campaign_runs.run_chunked_distribute(
+                run_id=run_id,
+                targets=targets,
+                account_ids=req.account_ids,
+                arms=arms,
+                delete_after_s=req.delete_after_s,
+                campaign=req.campaign or req.sheet_group_name,
+                group_name=req.sheet_group_name,
+            )
+        )
+        return {
+            "status": "running_in_background",
+            "run_id": run_id,
+            "targets_found": len(targets),
+            "filtered_out": filtered_out,
+            "no_username_out": no_username_out,
+            "deduped_out": deduped_out,
+            "arms": [a["name"] for a in arms],
+            "enqueued": {aid: {a["name"]: 0 for a in arms} for aid in req.account_ids},
+        }
+
+    # Small batch / no AI — inline path is fine (< 30s typical).
     try:
         counts = await sender.distribute_arms_round_robin(
             targets=targets,
@@ -1136,14 +1185,12 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
             group_name=req.sheet_group_name,
         )
     except ai_openers.AIOpenerError as e:
-        # Fail the whole launch if any AI generation fails. Don't ship a
-        # half-personalized batch — the user would get a confusing
-        # campaign with some custom and some default copy.
         raise HTTPException(
             status_code=502,
             detail=f"AI opener generation failed: {e}",
         )
     return {
+        "status": "completed",
         "enqueued": counts,
         "targets_found": len(targets),
         "filtered_out": filtered_out,
@@ -1151,6 +1198,20 @@ async def campaign_enqueue_from_sheet(req: CampaignFromSheetRequest):
         "deduped_out": deduped_out,
         "arms": [a["name"] for a in arms],
     }
+
+
+@app.get("/api/campaigns/runs")
+async def campaign_runs_list(limit: int = 30):
+    """Recent campaign runs — running + completed + failed."""
+    return campaign_runs.list_runs(limit=limit)
+
+
+@app.get("/api/campaigns/runs/{run_id}")
+async def campaign_run_get(run_id: str):
+    run = campaign_runs.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return run
 
 
 @app.get("/api/campaigns/ai/status")

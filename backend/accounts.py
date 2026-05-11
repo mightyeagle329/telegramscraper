@@ -143,6 +143,67 @@ def daily_limit_for(warmup_started_at: Optional[str]) -> int:
     return STEADY_DAILY_LIMIT
 
 
+# How long a PeerFlood/FloodWait penalty period lasts after the
+# transient pause clears. During this window the account sends at half
+# its normal daily limit + slower delays — gives Telegram time to relax
+# its flag instead of immediately re-flooding.
+FLOOD_RECOVERY_DAYS = 7
+FLOOD_RECOVERY_RATIO = 0.5
+
+
+def _in_flood_recovery(account: dict[str, Any]) -> bool:
+    until = account.get("flood_penalty_until")
+    if not until:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(until))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt > datetime.now(timezone.utc)
+    except ValueError:
+        return False
+
+
+def effective_daily_limit(account: dict[str, Any]) -> int:
+    """Today's effective DM limit accounting for flood-recovery penalty.
+
+    During recovery the account runs at FLOOD_RECOVERY_RATIO of its
+    warm-up-derived limit — gives Telegram space to clear its flag
+    instead of immediately re-tripping it after the pause window.
+    """
+    base = daily_limit_for(account.get("warmup_started_at"))
+    if base <= 0:
+        return 0
+    if _in_flood_recovery(account):
+        return max(1, int(base * FLOOD_RECOVERY_RATIO))
+    return base
+
+
+def effective_delay_range_s(account: dict[str, Any]) -> tuple[int, int]:
+    """Send-delay window for this account.
+
+    Default 45-180s for healthy accounts; 120-300s for accounts in
+    flood recovery (slower cadence so the pattern looks less burst-y).
+    """
+    if _in_flood_recovery(account):
+        return (120, 300)
+    return (45, 180)
+
+
+def start_flood_recovery(account: dict[str, Any], days: int = FLOOD_RECOVERY_DAYS) -> None:
+    """Mark this account as entering the gentle-recovery window.
+
+    Called when the sender's error handler classifies a PeerFloodError
+    (or long FloodWait) — the transient pause clears on schedule but
+    the account stays in reduced-rate mode for ``days`` days afterward.
+    """
+    from datetime import timedelta as _td
+
+    account["flood_penalty_until"] = (
+        datetime.now(timezone.utc) + _td(days=int(days))
+    ).isoformat()
+
+
 def reset_daily_counter_if_stale(account: dict[str, Any]) -> bool:
     """Zero `daily_sent` if we've crossed into a new UTC day. Returns True on reset."""
     now = datetime.now(timezone.utc)
@@ -164,11 +225,16 @@ def can_send(account: dict[str, Any]) -> tuple[bool, str]:
     """Check whether an account is eligible to send a DM right now.
 
     Returns (ok, reason_if_not).
+
+    Uses the **effective** daily limit (warm-up curve × any
+    flood-recovery penalty) — so a paused-then-recovering account
+    self-throttles to half rate for a week without anyone seeing
+    "paused" in the dashboard.
     """
     if account.get("status") in (STATUS_PAUSED, STATUS_BANNED):
         return False, f"account status is {account['status']}"
     reset_daily_counter_if_stale(account)
-    limit = daily_limit_for(account.get("warmup_started_at"))
+    limit = effective_daily_limit(account)
     if limit <= 0:
         return False, "still in warm-up (no DMs yet)"
     if account.get("daily_sent", 0) >= limit:

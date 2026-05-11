@@ -7,14 +7,14 @@ import { useT } from "@/lib/i18n/context";
 import type { Account } from "@/lib/types";
 
 /**
- * Thin strip below the nav that surfaces unhealthy accounts.
+ * Thin strip below the nav that surfaces TERMINAL account issues only.
  *
- *   - Renders nothing when every account is `warming` or `active`.
- *   - Yellow banner if ≥1 account is `paused`.
- *   - Red banner if ≥1 account is `banned` (always takes priority).
+ * Transient rate-limit pauses (PeerFlood, FloodWait) are now handled
+ * silently by the sender — the account keeps its visible status and
+ * self-throttles internally. So this banner only shows when an account
+ * is genuinely banned (a state the operator has to act on).
  *
- * Polls every 30s. Separate from the /accounts page refresh so the badge
- * shows no matter which dashboard route the user is on.
+ * Polls every 30s. Renders nothing when every account is healthy.
  */
 export default function WorkerHealthBanner() {
   const t = useT();
@@ -40,35 +40,18 @@ export default function WorkerHealthBanner() {
 
   if (!accounts) return null;
   const banned = accounts.filter((a) => a.status === "banned").length;
-  const paused = accounts.filter((a) => a.status === "paused").length;
-  if (banned === 0 && paused === 0) return null;
-
-  const isBan = banned > 0;
-  const style = isBan
-    ? "bg-accent-red/10 border-accent-red/30 text-accent-red"
-    : "bg-accent-yellow/10 border-accent-yellow/30 text-accent-yellow";
+  if (banned === 0) return null;
 
   return (
-    <div className={`border-b ${style}`}>
+    <div className="border-b bg-accent-red/10 border-accent-red/30 text-accent-red">
       <div className="max-w-6xl mx-auto px-4 md:px-6 py-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs md:text-sm">
         <span className="flex items-center gap-2">
           <WarnIcon />
-          {isBan ? (
-            <span>
-              {banned === 1
-                ? `1 ${t("accounts.status.banned")}`
-                : `${banned} ${t("accounts.stat.banned").toLowerCase()}`}
-              {paused > 0
-                ? ` · ${paused} ${t("accounts.stat.paused").toLowerCase()}`
-                : ""}
-            </span>
-          ) : (
-            <span>
-              {paused === 1
-                ? `1 ${t("accounts.status.paused")}`
-                : `${paused} ${t("accounts.stat.paused").toLowerCase()}`}
-            </span>
-          )}
+          <span>
+            {banned === 1
+              ? `1 ${t("accounts.status.banned")}`
+              : `${banned} ${t("accounts.stat.banned").toLowerCase()}`}
+          </span>
         </span>
         <Link
           href="/accounts"

@@ -112,6 +112,20 @@ export interface AIStatus {
   model: string;
 }
 
+export interface CampaignRun {
+  run_id: string;
+  campaign: string;
+  status: "running" | "completed" | "failed";
+  started_at: string;
+  completed_at: string | null;
+  targets_total: number;
+  targets_processed: number;
+  enqueued: Record<string, Record<string, number>>;
+  arms: string[];
+  account_ids: string[];
+  error: string | null;
+}
+
 export interface BotStatus {
   configured: boolean;
   missing?: string[];

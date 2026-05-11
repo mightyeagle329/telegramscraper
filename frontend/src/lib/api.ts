@@ -9,6 +9,7 @@ import type {
   BotWriterPreview,
   BotWriterRunResult,
   CampaignArmInput,
+  CampaignRun,
   CampaignStats,
   GroupScorecard,
   JoinEvent,
@@ -223,9 +224,11 @@ export const api = {
     follow_up_templates?: string[];
   }) =>
     request<{
-      // For multi-arm campaigns this is `{[account]: {[arm]: count}}`.
-      // For legacy single-arm requests it's still keyed by account but the
-      // inner value is a `{ A: count }` dict from the backend.
+      // "completed" — synchronous inline launch (small / non-AI campaigns).
+      // "running_in_background" — large AI campaigns return a run_id and
+      // process in the background. Poll `getCampaignRun(run_id)` for progress.
+      status: "completed" | "running_in_background";
+      run_id?: string;
       enqueued: Record<string, Record<string, number>>;
       targets_found: number;
       filtered_out: number;
@@ -241,6 +244,11 @@ export const api = {
     request<CampaignStats>(
       `/api/campaigns/${encodeURIComponent(campaignName)}/stats`
     ),
+
+  listCampaignRuns: (limit = 30) =>
+    request<CampaignRun[]>(`/api/campaigns/runs?limit=${limit}`),
+  getCampaignRun: (runId: string) =>
+    request<CampaignRun>(`/api/campaigns/runs/${runId}`),
 
   getAIStatus: () => request<AIStatus>(`/api/campaigns/ai/status`),
 

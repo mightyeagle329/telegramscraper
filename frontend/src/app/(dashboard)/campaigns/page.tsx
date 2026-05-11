@@ -12,6 +12,7 @@ import ArmsEditor, { makeArm, type ArmDraft } from "@/components/ArmsEditor";
 import type {
   Account,
   CampaignArmInput,
+  CampaignRun,
   CampaignStats,
   QueueSnapshotEntry,
   SentLogEntry,
@@ -306,11 +307,19 @@ export default function CampaignsPage() {
               .map((a) => a.name)
               .join("/")})`
           : "";
+      const isBackground = result.status === "running_in_background";
+      const verb = isBackground ? "Launching" : "Queued";
+      const accountCount =
+        selectedAccountIds.length || Object.keys(result.enqueued).length;
+      const tail = isBackground
+        ? ` — large campaign running in background, DMs will start flowing within ~30 seconds. ` +
+          `Track progress on the In-flight runs panel below, or just watch /dashboard.`
+        : ".";
       setMessage({
         kind: "ok",
-        text: `Queued ${totalEnqueued} DMs across ${
-          Object.keys(result.enqueued).length
-        } accounts${armsNote} (from ${result.targets_found} sheet rows)${filteredNote}${noUsernameNote}${dedupeNote}.`,
+        text: `${verb} ${
+          isBackground ? result.targets_found : totalEnqueued
+        } DMs across ${accountCount} accounts${armsNote} (from ${result.targets_found} sheet rows)${filteredNote}${noUsernameNote}${dedupeNote}${tail}`,
       });
       // Pre-load stats for this campaign so the user can watch the A/B
       // race resolve over time.
@@ -611,6 +620,10 @@ export default function CampaignsPage() {
           </div>
         </section>
 
+        {/* In-flight campaign runs — visible while large AI campaigns are
+            still generating openers in the background */}
+        <InflightRunsPanel />
+
         {/* A/B test stats — viewable for any campaign that has sent log entries */}
         <section className="bg-card-bg border border-card-border rounded-xl p-5">
           <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
@@ -846,5 +859,112 @@ function ArmStatsTable({ stats }: { stats: CampaignStats }) {
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Shows campaign runs that landed via the async/background path —
+ * large AI-mode launches whose opener generation takes minutes.
+ * Auto-refreshes every 5 seconds so the user watches targets_processed
+ * tick up live and sees the first DMs hit the dashboard within ~30s.
+ *
+ * Renders nothing when there are no recent runs, so the section is
+ * invisible during small inline-completed campaigns.
+ */
+function InflightRunsPanel() {
+  const [runs, setRuns] = useState<CampaignRun[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const list = await api.listCampaignRuns(10);
+        if (!cancelled) setRuns(list);
+      } catch {
+        if (!cancelled) setRuns([]);
+      }
+    };
+    refresh();
+    const interval = setInterval(refresh, 5_000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Show: anything still running + the 3 most-recently-finished so the
+  // user has feedback after the campaign completes.
+  const visible = useMemo(() => {
+    const running = runs.filter((r) => r.status === "running");
+    const finished = runs.filter((r) => r.status !== "running").slice(0, 3);
+    return [...running, ...finished];
+  }, [runs]);
+
+  if (visible.length === 0) return null;
+
+  return (
+    <section className="bg-card-bg border border-card-border rounded-xl p-5">
+      <h2 className="text-lg font-semibold mb-3">In-flight campaign runs</h2>
+      <ul className="space-y-3">
+        {visible.map((r) => (
+          <RunRow key={r.run_id} run={r} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function RunRow({ run }: { run: CampaignRun }) {
+  const pct =
+    run.targets_total > 0
+      ? Math.min(100, (run.targets_processed / run.targets_total) * 100)
+      : 0;
+  const enqueued = useMemo(
+    () =>
+      Object.values(run.enqueued).reduce(
+        (sum, perArm) =>
+          sum + Object.values(perArm).reduce((s, n) => s + (n || 0), 0),
+        0
+      ),
+    [run]
+  );
+  const statusColor =
+    run.status === "running"
+      ? "text-accent-yellow"
+      : run.status === "completed"
+      ? "text-accent-green"
+      : "text-accent-red";
+  return (
+    <li className="border-b border-card-border/40 last:border-b-0 pb-3 last:pb-0">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <span className="font-medium truncate max-w-xs">{run.campaign}</span>
+        <span className={`text-xs font-mono uppercase tracking-wide ${statusColor}`}>
+          {run.status}
+        </span>
+      </div>
+      <div className="text-xs text-text-muted mt-1">
+        {run.targets_processed} / {run.targets_total} targets · {enqueued} DMs
+        enqueued · {run.arms.length} arm{run.arms.length === 1 ? "" : "s"} (
+        {run.arms.join(", ")}) · {run.account_ids.length} account
+        {run.account_ids.length === 1 ? "" : "s"}
+      </div>
+      <div className="h-1.5 bg-card-border/30 rounded overflow-hidden mt-2">
+        <div
+          className={
+            run.status === "completed"
+              ? "h-full bg-accent-green"
+              : run.status === "failed"
+              ? "h-full bg-accent-red"
+              : "h-full bg-accent-yellow"
+          }
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      {run.error ? (
+        <div className="text-xs text-accent-red mt-1 break-words">
+          {run.error}
+        </div>
+      ) : null}
+    </li>
   );
 }

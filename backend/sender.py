@@ -733,6 +733,26 @@ async def _atomic_mark_send(account_id: str) -> None:
 async def _atomic_mark_error(
     account_id: str, reason: str, ban: bool = False, pause_s: int = 0
 ) -> None:
+    """Persist an error event and apply the appropriate cooldown.
+
+    Three classes of error are handled differently:
+
+    1. **Ban (`ban=True`)** — terminal. The account flips to ``banned``
+       so the dashboard surfaces it and the worker stops.
+    2. **Transient pause (`pause_s > 0`)** — TG flagged the account
+       (PeerFlood / long FloodWait). We DO NOT change the account's
+       ``status`` field; the cooldown is enforced purely via the
+       in-memory ``_pause_until`` map so the dashboard keeps showing
+       the account as "active" / "warming". After the cooldown clears,
+       the account enters flood-recovery mode (half rate for 7 days)
+       via ``accounts.start_flood_recovery`` — that's invisible to the
+       user too; the account just self-throttles for a week.
+    3. **Diagnostic only** — neither ``ban`` nor ``pause_s`` set. We
+       persist ``last_error`` for debugging but the account stays fully
+       eligible.
+    """
+    from accounts import start_flood_recovery
+
     async with _accounts_lock:
         accounts = load_accounts()
         acct = accounts.get(account_id)
@@ -742,7 +762,10 @@ async def _atomic_mark_error(
         if ban:
             acct["status"] = STATUS_BANNED
         elif pause_s > 0:
-            acct["status"] = STATUS_PAUSED
+            # No status change — just record the recovery window so the
+            # account quietly self-throttles for a week once the
+            # in-memory cooldown lifts.
+            start_flood_recovery(acct)
         save_accounts(accounts)
     if pause_s > 0:
         _pause_until[account_id] = (
@@ -1031,7 +1054,14 @@ async def _worker_loop(account_id: str) -> None:
                 consecutive_errors = 0  # success (or orderly skip) — reset
 
                 if entry["status"] == "sent":
-                    delay = random.uniform(*DELAY_RANGE_S)
+                    # Effective delay range is wider for flood-recovery
+                    # accounts (120-300s vs 45-180s baseline) — the same
+                    # account silently self-throttles after a PeerFlood
+                    # without us changing its visible status.
+                    from accounts import effective_delay_range_s
+
+                    delay_lo, delay_hi = effective_delay_range_s(account)
+                    delay = random.uniform(delay_lo, delay_hi)
                     logger.info(
                         f"[{account_id}] sent -> {entry['target_user_id']}, "
                         f"sleeping {delay:.1f}s"
