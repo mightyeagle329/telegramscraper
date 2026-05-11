@@ -50,22 +50,32 @@ MAX_OUTPUT_TOKENS = 80
 MAX_OPENER_CHARS = 320  # tightened from 400 — Telegram readers skim, long is bad
 
 # Regex blocklist applied to every generated opener. Anything matching
-# triggers a regenerate. Order matters — generic spam triggers first.
-# These are intentionally aggressive: better to regenerate than to ship
-# a flagged DM.
+# triggers a regenerate. Tuned for the casino/sweepstakes vertical: we
+# keep the truly-spammy patterns (URLs, urgency, scam-style guarantees,
+# explicit sales CTAs) and DROP generic vertical vocabulary (slots,
+# casino, win, etc.) — those words appear in normal conversation with a
+# casino-curious audience and blocking them produces all-3-attempts-fail
+# loops that 502 entire campaigns.
 BLOCKLIST_PATTERNS: list[tuple[str, re.Pattern]] = [
     ("contains url", re.compile(r"https?://|t\.me/|telegram\.me/", re.I)),
     ("contains mention/handle", re.compile(r"@\w{3,}", re.I)),
     ("contains 'dm me'", re.compile(r"\bdm\s+me\b", re.I)),
     ("placeholder leak", re.compile(r"\{\s*(first_name|last_name|username)\s*\}", re.I)),
-    ("forbidden gambling word", re.compile(
-        r"\b(casino|win|bet|betting|wager|gambling|jackpot|deposit|bonus|"
-        r"odds|slots|tournament|prize|payout)\b", re.I)),
-    ("urgency language", re.compile(
+    # Hard urgency / pressure language only — soft references to "tonight"
+    # or "this weekend" are fine; "act now / hurry / last chance" are not.
+    ("urgency pressure", re.compile(
         r"\b(limited\s+time|act\s+(now|fast|today)|don'?t\s+miss|"
-        r"hurry|exclusive\s+offer|last\s+chance)\b", re.I)),
-    ("guarantees", re.compile(r"\bguarantee[ds]?\b|100%|sure\s+win", re.I)),
-    ("explicit cta", re.compile(r"\b(click|tap|join|register)\s+(here|now|this)\b", re.I)),
+        r"hurry\s+up|exclusive\s+offer|last\s+chance)\b", re.I)),
+    # Scam-flavoured guarantees: blocks "guaranteed win" / "100% win" /
+    # "sure thing" but allows the words "guarantee" / "100%" on their own
+    # if a downstream sentence doesn't tie them to winning.
+    ("guarantees", re.compile(
+        r"\bguaranteed\s+win\b|100%\s+win|sure\s+(win|thing)\b", re.I)),
+    # Explicit sales CTAs ("click here", "join now") — natural questions
+    # like "what slots have you been playing?" are fine.
+    ("explicit cta", re.compile(
+        r"\b(click|tap)\s+(here|now|this|the\s+link)\b|"
+        r"\bregister\s+(now|today|here)\b", re.I)),
 ]
 
 # The professional system prompt — replaces the previous 6-bullet version.
@@ -91,12 +101,18 @@ Get a reply. Not a sale, not a click, not a follow-back. Just a reply. The sende
 # Forbidden — regenerate if any appear
 - URLs of any kind, including t.me/ links.
 - @username mentions of OTHER accounts (you may use the recipient's own first name only).
-- "DM me back", "let me know", "click", "tap", "join", "register", "sign up".
-- Gambling vocabulary in the FIRST message: casino, win, bet, betting, wager, gambling, jackpot, deposit, bonus, odds, slots, tournament, prize, payout. (You can hint at sports/gaming context — "what slots", "any picks tonight" — but the explicit words trigger spam filters.)
-- Urgency: "limited time", "act now", "don't miss", "exclusive", "last chance".
-- Guarantees: "guaranteed", "100%", "sure win".
+- Explicit sales CTAs: "DM me back", "click here", "tap the link", "register now", "sign up today".
+- Hard urgency language: "limited time", "act now", "hurry up", "exclusive offer", "last chance". (Soft time references like "tonight" or "this weekend" are fine.)
+- Scam-style guarantees: "guaranteed win", "100% win", "sure thing".
 - Curly braces of any kind.
 - Emoji unless the sender's style notes explicitly request them.
+
+# Allowed in conversation
+- Casual references to the recipient's interests are encouraged: slots,
+  games, picks, tournaments, plays — anything that sounds like two
+  members of the same community chatting.
+- The hook should feel like one player asking another about their week,
+  NOT a sales pitch.
 
 # Few-shot examples — the bar to clear
 
@@ -112,8 +128,8 @@ GOOD (no name available, omits greeting):
 BAD (generic, no specific hook):
 > Hey! How are you doing today?
 
-BAD (forbidden word + cta):
-> Hi! Want to win some big jackpots? DM me to learn more.
+BAD (explicit sales CTA — "DM me" is a spam trigger regardless of topic):
+> Hi! Sounds like you'd love our offers — DM me to learn more.
 
 BAD (urgency + url):
 > Limited time bonus inside! Click https://example.com now!
@@ -260,8 +276,19 @@ async def _generate_candidate(
 async def _generate_single_stage(
     target: dict, group_name: str, style: str, model: str, retries: int = 2
 ) -> str:
-    """Single-call generation with retry on validation failure."""
+    """Single-call generation with retry on validation failure.
+
+    If every attempt fails validation, the LAST attempt is returned with
+    a warning log — rather than raising and 502-ing the whole campaign.
+    The blocklist is a quality nudge for GPT, not a hard wall; a single
+    unlucky retry sequence shouldn't kill an entire launch.
+
+    Network/API failures (AIOpenerError raised by _generate_candidate)
+    are still hard errors after the retry budget — those mean OpenAI is
+    actually broken and there's nothing to ship.
+    """
     last_reason = "no attempts"
+    last_text = ""
     for attempt in range(retries + 1):
         try:
             text = await _generate_candidate(target, group_name, style, model)
@@ -273,8 +300,14 @@ async def _generate_single_stage(
         if reason is None:
             return text
         last_reason = reason
+        last_text = text
         logger.debug(f"AI opener rejected ({reason}); retry {attempt + 1}")
-    raise AIOpenerError(f"All {retries + 1} attempts failed validation: {last_reason}")
+    # All retries exhausted but we DO have a generated opener — log + ship.
+    logger.warning(
+        f"AI opener: all {retries + 1} attempts tripped validation "
+        f"({last_reason!r}); shipping last attempt anyway: {last_text!r}"
+    )
+    return last_text
 
 
 # ---------- two-stage generation (premium mode) ----------
