@@ -1,0 +1,35 @@
+[
+  {
+    "account_id": "acc_005",
+    "recipient_user_id": 1306036407,
+    "recipient_username": null,
+    "sentiment": "positive",
+    "response": "hey! glad to hear you're in the community. if you want to catch up on everything, check out our group here: https://t.me/titantreasurecasino.",
+    "message_id": 35,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-11T14:33:47.475188+00:00"
+  },
+  {
+    "account_id": "acc_001",
+    "recipient_user_id": 8501581566,
+    "recipient_username": null,
+    "sentiment": "neutral",
+    "response": "totally get it! if you ever want to chat about the game or just hang out, feel free to join our group: https://t.me/titantreasurecasino",
+    "message_id": 327,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-11T14:34:12.106159+00:00"
+  },
+  {
+    "account_id": "acc_008",
+    "recipient_user_id": 7653635079,
+    "recipient_username": null,
+    "sentiment": "neutral",
+    "response": "no worries! we\u2019re all learning together. if you're interested, feel free to join our community at https://t.me/titantreasurecasino!",
+    "message_id": 27,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-11T14:34:21.991010+00:00"
+  }
+]

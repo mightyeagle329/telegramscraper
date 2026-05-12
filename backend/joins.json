@@ -1,0 +1,22 @@
+[
+  {
+    "user_id": 1306036407,
+    "group_id": 3777356353,
+    "group_name": "Titan Treasure Casino",
+    "joined_at": "2026-05-11T18:31:13.733753+00:00",
+    "source_account": "acc_005",
+    "source_campaign": "Streak",
+    "source_arm": "A",
+    "attributed": true
+  },
+  {
+    "user_id": 8501581566,
+    "group_id": 3777356353,
+    "group_name": "Titan Treasure Casino",
+    "joined_at": "2026-05-12T01:31:12.794407+00:00",
+    "source_account": "acc_001",
+    "source_campaign": "Elza",
+    "source_arm": "A",
+    "attributed": true
+  }
+]
