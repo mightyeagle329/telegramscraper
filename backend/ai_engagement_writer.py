@@ -380,6 +380,7 @@ async def _append_to_sheet(rows: list[dict], schedule: list[datetime]) -> int:
     out; ``approve_post`` flips them to ``approved`` to release them.
     """
     from engagement_bot import _get_sheet, PENDING_REVIEW_STATUS
+    from sheets import invalidate_sheet_cache
 
     ws = _get_sheet()
     appended = 0
@@ -402,6 +403,10 @@ async def _append_to_sheet(rows: list[dict], schedule: list[datetime]) -> int:
         except Exception as e:
             logger.warning(f"engagement writer: append_row failed: {e}")
             break
+    if appended:
+        # Stats cache counts every tab including BotPosts; invalidate so
+        # /contacts (and other consumers) see fresh row counts.
+        invalidate_sheet_cache(ws.title)
     return appended
 
 

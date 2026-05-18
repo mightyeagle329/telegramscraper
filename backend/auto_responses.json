@@ -31,5 +31,109 @@
     "skipped": false,
     "skip_reason": null,
     "recorded_at": "2026-05-11T14:34:21.991010+00:00"
+  },
+  {
+    "account_id": "acc_012",
+    "recipient_user_id": 2053425168,
+    "recipient_username": null,
+    "sentiment": "neutral",
+    "response": "hey! it's on Telegram. if you're interested, you can check out our community here: https://t.me/titantreasurecasino",
+    "message_id": 63,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-12T07:07:49.479205+00:00"
+  },
+  {
+    "account_id": "acc_001",
+    "recipient_user_id": 1300339728,
+    "recipient_username": null,
+    "sentiment": "negative",
+    "skipped": true,
+    "skip_reason": "negative sentiment",
+    "recorded_at": "2026-05-13T02:35:30.327224+00:00"
+  },
+  {
+    "account_id": "acc_004",
+    "recipient_user_id": 1855610012,
+    "recipient_username": null,
+    "sentiment": "neutral",
+    "response": "hey! good day to you too. if you're interested, we have a great community over at https://t.me/titantreasurecasino. feel free to join!",
+    "message_id": 17,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-13T14:37:08.181831+00:00"
+  },
+  {
+    "account_id": "acc_001",
+    "recipient_user_id": 7080685139,
+    "recipient_username": null,
+    "sentiment": "neutral",
+    "response": "just wanted to connect and share some cool stuff! if you're interested, check out our group: https://t.me/titantreasurecasino.",
+    "message_id": 337,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-13T15:02:05.044920+00:00"
+  },
+  {
+    "account_id": "acc_008",
+    "recipient_user_id": 6073800893,
+    "recipient_username": null,
+    "sentiment": "negative",
+    "skipped": true,
+    "skip_reason": "negative sentiment",
+    "recorded_at": "2026-05-13T15:30:49.470596+00:00"
+  },
+  {
+    "account_id": "acc_003",
+    "recipient_user_id": 8453339908,
+    "recipient_username": null,
+    "sentiment": "negative",
+    "skipped": true,
+    "skip_reason": "negative sentiment",
+    "recorded_at": "2026-05-14T00:53:33.866048+00:00"
+  },
+  {
+    "account_id": "acc_008",
+    "recipient_user_id": 7759335225,
+    "recipient_username": null,
+    "sentiment": "neutral",
+    "response": "\u0434\u043e\u0431\u0440\u043e\u0433\u043e \u0434\u043d\u044f! \u0437\u0440\u043e\u0437\u0443\u043c\u0456\u043b\u043e, \u0441\u043f\u0456\u043b\u043a\u0443\u0454\u043c\u043e\u0441\u044c, \u043a\u043e\u043b\u0438 \u0431\u0443\u0434\u0435 \u0437\u0440\u0443\u0447\u043d\u043e. \u044f\u043a\u0449\u043e \u0446\u0456\u043a\u0430\u0432\u043e, \u043f\u0440\u0438\u0454\u0434\u043d\u0443\u0439\u0442\u0435\u0441\u044c \u0434\u043e \u043d\u0430\u0448\u043e\u0457 \u0433\u0440\u0443\u043f\u0438 \u0442\u0443\u0442: https://t.me/titantreasurecasino.",
+    "message_id": 40,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-15T14:56:29.581566+00:00"
+  },
+  {
+    "account_id": "acc_003",
+    "recipient_user_id": 5331202188,
+    "recipient_username": null,
+    "sentiment": "positive",
+    "response": "glad to hear that! if you're interested, we have a cool community over at https://t.me/titantreasurecasino.",
+    "message_id": 51,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-15T16:45:17.239573+00:00"
+  },
+  {
+    "account_id": "acc_003",
+    "recipient_user_id": 7662391642,
+    "recipient_username": "NotThe1CRYBABY",
+    "sentiment": "neutral",
+    "response": "sounds interesting! if you're into that, we have a community where we share tips and experiences. check it out: https://t.me/titantreasurecasino",
+    "message_id": 53,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-17T09:47:26.398713+00:00"
+  },
+  {
+    "account_id": "acc_003",
+    "recipient_user_id": 8202753224,
+    "recipient_username": null,
+    "sentiment": "positive",
+    "response": "that's great to hear! we're all waiting for that big cash out moment. feel free to join our community at https://t.me/titantreasurecasino \u2014 would love to see you there!",
+    "message_id": 60,
+    "skipped": false,
+    "skip_reason": null,
+    "recorded_at": "2026-05-17T18:20:19.271935+00:00"
   }
 ]
